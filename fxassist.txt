@@ -1,0 +1,157 @@
+[default]
+# Programmmeldungen
+# 0x00000-0x0ffff  Programmmeldungen
+# 0x00000-0x00fff    Allgemeine Meldungen / Meldungen Hauptprogramm
+# 0x00000-0x001ff      Meldungen Hauptprogramm 
+# 0x00200-0x002ff      Meldungen Modul CmdLine  
+# 0x00200-0x0020f        Meldung 1. Modul CmdLine Allgemein
+# 0x00210-0x0021f        Meldung 1. Modul CmdLine 1. Subroutine
+# 0x00220-0x0022f        Meldung 1. Modul CmdLine 2. Subroutine
+# 0x00300-0x003ff      Meldungen Modul Trace
+# 0x00400-0x004ff      Meldungen Modul Configuration
+# 0x00500-0x005ff      Meldungen Modul DBAccess
+# 0x01000-0x01fff    Usage
+# 0x02000-0x07fff    Modul- und procedurespezifische Meldungen
+# 0x02000-0x02fff      Meldung 1. Modul PROGRAMM.pm
+# 0x02000-0x020ff        Meldung 1. Modul Allgemein
+# 0x02100-0x021ff        Meldung 1. Modul 1. Subroutine
+# 0x02200-0x022ff        Meldung 1. Modul 2. Subroutine
+# 0x03000-0x03fff      Meldung 2. Modul
+# 0x04000-0x04fff      Meldung 3. Modul
+# 0x05000-0x05fff      Meldung 4. Modul
+# 0x06000-0x06fff      Meldung 5. Modul
+# 0x07000-0x07fff      Meldung 6. Modul
+# 0x08000-0x0ffff  Fehlermeldungen
+# 0x08000-0x09fff    Allgemeine Fehlermeldungen / Fehlermeldungen Hauptprogramm
+# 0x08000-0x081ff      Fehlermeldung Hauptprogramm 
+# 0x08200-0x082ff      Fehlermeldung Modul CmdLine  
+# 0x08200-0x0820f        Fehlermeldung 1. Modul CmdLine Allgemein
+# 0x08210-0x0821f        Fehlermeldung 1. Modul CmdLine 1. Subroutine
+# 0x08220-0x0822f        Fehlermeldung 1. Modul CmdLine 2. Subroutine
+# 0x08300-0x083ff      Fehlermeldung Modul Trace
+# 0x08400-0x084ff      Fehlermeldung Modul Configuration
+# 0x08500-0x085ff      Fehlermeldung Modul DBAccess
+# 0x0a000-0x0ffff    Modul- und procedurespezifische Fehlermeldungen
+# 0x0a000-0x0afff      Fehlermeldung 1. Modul PROGRAMM.pm
+# 0x0a000-0x0a0ff        Fehlermeldung 1. Modul Allgemein
+# 0x0a100-0x0a1ff        Fehlermeldung 1. Modul 1. Subroutine
+# 0x0a200-0x0a2ff        Fehlermeldung 1. Modul 2. Subroutine
+# 0x0b000-0x0bfff      Fehlermeldung 2. Modul
+# 0x0c000-0x0cfff      Fehlermeldung 3. Modul
+# 0x0d000-0x0dfff      Fehlermeldung 4. Modul
+# 0x0e000-0x0efff      Fehlermeldung 5. Modul
+# 0x0f000-0x0ffff      Fehlermeldung 6. Modul
+# 0x10000-0xfffff  Benutzerspezifische Meldungen
+
+#########################################################################################
+# Allgemeine Ausgaben
+#            Meldungen: 0x00000-0x00fff
+#            Fehler:    0x08000-0x08fff
+#########################################################################################
+
+0x00000 = Unbekannter Meldungscode: %s
+0x00001 = Starte %s %s
+0x00002 = Beende %s %s
+
+0x00012 = Altes Lockfile geloescht (%s).
+0x00013 = Programm <%s> kann nicht mehrfach gestartet werden (%s existiert bereits)!
+0x00014 = Lockfile <%s> angelegt.
+
+0x08000 = Fehler beim Schreiben des Logfiles <%s>
+0x08001 = Kann das Modul <%s> nicht laden
+0x08002 = Erforderliche INI-Variable nicht gesetzt: [%s] %s
+0x08003 = Zu wenig oder fehlerhafte Aufrufparameter <%s>
+
+##########################################################################################
+# Modul CmdLine
+#            Meldungen: 0x00200-0x002ff
+#            Fehler:    0x08200-0x082ff
+
+##########################################################################################
+# Modul Trace
+#            Meldungen: 0x00300-0x003ff
+#            Fehler:    0x08300-0x083ff
+
+##########################################################################################
+# Modul Configuration
+#            Meldungen: 0x00400-0x004ff
+#            Fehler:    0x08400-0x084ff
+0x08400 = Fehler beim Lesen der Konfigurationsdatei oder in der Konfigurationsdatei <%s>
+0x08401 = <%s> in der Konfigurationsdatei Sektion <%s> fuer Variable <%s> definiert.
+
+##########################################################################################
+# Modul DBAccess
+#            Meldungen: 0x00500-0x005ff
+#            Fehler:    0x08500-0x085ff
+# Modul DBAccess
+0x00500 = DB-Zugriff korrekt: <%s> <%s>
+0x08500 = DB-Zugriff fehlerhaft: <%s> <%s>
+
+#########################################################################################
+# Usage 0x01000-0x01fff
+0x01000 = Aufruf: %s [-i <Initialisierungsfile>] [-d <Debuglevel>] [-h] [-v]
+0x01001 = OPTION:
+0x01002 = '  -i, --init         Initialisierungsfile'
+0x01003 = '                     Default: $PRG$.ini im Verzeichnis von'
+0x01004 = '                              $PRGEXT$'
+0x01005 = '  -d, --debug        Debuginformationen anzeigen'
+0x01006 = '  -t, --test         Testmode 0: Kein Test'
+0x01007 = '                              1: Kein Schreiben in die Datenbank nur Lesen'
+0x01008 = '                              2: Kein Lesen oder Schreiben in die Datenbank'
+0x01009 = '                     Default: 0'
+0x0100a = '  -h, --help         Diese Hilfe anzeigen und beenden'
+0x0100b = '  -v, --version      Versionsinformation anzeigen und beenden'
+
+#########################################################################################
+# Programmausgabe
+#########################################################################################
+
+##########################################################################################
+# Procedure doDebug
+# Proc Nr. 1 Meldungen: 0x02100-0x021ff
+#            Fehler:    0x0a100-0x0a1ff
+0x02100 = Response Status: <%s>
+0x02101 = Response Header: <%s>
+0x02102 = Response Content: <%s>
+0x02103 = Dokument ist gueltig bis: <%s>
+
+# Procedure doLogin
+# Proc Nr. 2 Meldungen: 0x02200-0x022ff
+#            Fehler:    0x0a200-0x0a2ff
+0x02200 = Letzter Aufruf war ein <%s>. Aktueller Aufruf ist ein <%s>.
+0x02201 = Login
+0x02203 = Response gueltig <%s>
+0x02204 = Response: %s: <%s>
+0x02205 = Response redirected to <%s> (%s).
+0x02206 = Response angekommen <%s>
+0x02207 = Response Title <%s>
+0x02208 = Response Status <%s>
+0x02209 = Request/Response Redirection Status <%s>
+0x0220a = Login erfolgreich. Status <%s> Naechste Operation <%s>.
+
+0x0a200 = Login nicht erfolgreich. Status <%s> Naechste Operation <%s>.
+
+# Procedure doData
+# Proc Nr. 3 Meldungen: 0x02300-0x023ff
+#            Fehler:    0x0a300-0x0a3ff
+0x02300 = Letzter Aufruf war ein <%s>. Aktueller Aufruf ist ein <%s>.
+0x02301 = Hole Signal
+0x02303 = Response gueltig <%s>
+0x02304 = Response: %s: <%s>
+0x02305 = Response redirected to <%s> (%s).
+0x02306 = Response angekommen <%s>
+0x02307 = Response Location <%s>
+0x02308 = Response Status <%s>
+0x02309 = Request/Response Redirection Status <%s>
+0x0230a = Hole Signal erfolgreich. Status <%s> Naechste Operation <%s>.
+0x02310 = %s
+
+0x0a300 = Hole Signal nicht erfolgreich. Status <%s> Naechste Operation <%s>.
+
+# Procedure delay
+# Proc Nr. 4 Meldungen: 0x02400-0x024ff
+#            Fehler:    0x0a400-0x0a4ff
+0x02400 = Warteschleife (<%s> von <%s>)
+0x02401 = Letzter Refresh vor %s Sekunden (Zykluszeit %s). Fuehre einen Refresh durch.
+
+[english]

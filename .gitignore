@@ -1,0 +1,14 @@
+.includepath
+.project
+.checkstyle
+fxassist.ini
+fxassist.pid
+fxassist.mem
+fxassist.lwp
+Testdaten/*
+Work/*
+lib/CmdLine.pm
+lib/Configuration.pm
+lib/DBAccess.pm
+lib/Trace.pm
+lib/Utils.pm

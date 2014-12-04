@@ -112,62 +112,80 @@
 #            Fehler:    0x0a100-0x0a1ff
 0x02100 = Response: %s: <%s>
 
-# Procedure doLogin
+
+##########################################################################################
+# Procedure doDebugSignal
 # Proc Nr. 2 Meldungen: 0x02200-0x022ff
 #            Fehler:    0x0a200-0x0a2ff
-0x02200 = Letzter Aufruf war ein <%s>. Aktueller Aufruf ist ein <%s>.
-0x02201 = Login
-0x02203 = Response gueltig <%s>
-0x02204 = Response: %s: <%s>
-0x02206 = Response angekommen <%s>
-0x02209 = Request/Response Redirection Status <%s>
-0x0220a = Login erfolgreich. Status <%s> Naechste Operation <%s>.
+0x02200 = %s %s
 
-0x0a200 = Login nicht erfolgreich. Status <%s> Naechste Operation <%s>.
 
-# Procedure doGetIn
+##########################################################################################
+# Procedure myGet
 # Proc Nr. 3 Meldungen: 0x02300-0x023ff
 #            Fehler:    0x0a300-0x0a3ff
-0x02300 = Letzter Aufruf war ein <%s>. Aktueller Aufruf ist ein <%s>.
-0x02301 = Hole Signal
-0x02302 = Neues Signal ID: <%s>
-0x02303 = Response gueltig <%s>
-0x0230a = Hole Signal erfolgreich. Status <%s> Naechste Operation <%s>.
+0x02300 = Warteschleife (<%s> von <%s>)
+0x02301 = Letzter Refresh vor %s Sekunden (Zykluszeit %s). Fuehre einen Refresh durch.
 
-0x0a300 = Hole Signal nicht erfolgreich. Status <%s> Naechste Operation <%s>.
 
-# Procedure delay
+##########################################################################################
+# Procedure myPost
 # Proc Nr. 4 Meldungen: 0x02400-0x024ff
 #            Fehler:    0x0a400-0x0a4ff
-0x02400 = Warteschleife (<%s> von <%s>)
-0x02401 = Letzter Refresh vor %s Sekunden (Zykluszeit %s). Fuehre einen Refresh durch.
 
-# Procedure doGetOut
+
+##########################################################################################
+# Procedure action
 # Proc Nr. 5 Meldungen: 0x02500-0x025ff
 #            Fehler:    0x0a500-0x0a5ff
-0x02500 = Letzter Aufruf war ein <%s>. Aktueller Aufruf ist ein <%s>.
-0x02501 = Teste Status von Signal <%s>
-0x02502 = Seite vorhanden (%s). Signal <%s> im Archiv -> deaktivieren
-0x02503 = Seite nicht vorhanden (%s). Signal <%s> noch nicht im Archiv
-0x0250a = Naechste Operation <%s>.
-0x02510 = %s
 
-0x0a500 = Hole Signal nicht erfolgreich. Status <%s> Naechste Operation <%s>.
 
-# Procedure talk2MT4
+##########################################################################################
+# Procedure doLogin
 # Proc Nr. 6 Meldungen: 0x02600-0x026ff
 #            Fehler:    0x0a600-0x0a6ff
-0x02600 = Oeffne Position fuer Signal <%s>.
-0x02601 = Oeffnen der Position fuer Signal <%s> erfolgreich.
-0x02602 = Schliesse Position fuer Signal <%s>.
-0x02603 = Schliessen der Position fuer Signal <%s> erfolgreich.
+0x02600 = Login
+0x02601 = Response gueltig <%s>
+0x02602 = Login erfolgreich. Status <%s> Naechste Operation <%s>.
 
-0x0a600 = Oeffnen der Position fuer Signal <%s> nicht erfolgreich.
-0x0a601 = Schliessen der Position fuer Signal <%s> nicht erfolgreich.
+0x0a600 = Login nicht erfolgreich. Status <%s> Naechste Operation <%s>.
 
-# Procedure doDebugSignal
+
+##########################################################################################
+# Procedure doGetIn
 # Proc Nr. 7 Meldungen: 0x02700-0x027ff
 #            Fehler:    0x0a700-0x0a7ff
-0x02700 = %s %s
+0x02700 = Letzter Aufruf war ein <%s>. Aktueller Aufruf ist ein <%s>.
+0x02701 = Hole Signal
+0x02702 = Hole Signal erfolgreich. Status <%s> Naechste Operation <%s>.
+0x02703 = Neues Signal ID: <%s>
+
+0x0a700 = Hole Signal nicht erfolgreich. Status <%s> Naechste Operation <%s>.
+
+
+##########################################################################################
+# Procedure doGetOut
+# Proc Nr. 8 Meldungen: 0x02800-0x028ff
+#            Fehler:    0x0a800-0x0a8ff
+0x02800 = Teste Status von Signal <%s>
+0x02801 = Seite vorhanden (%s). Signal <%s> im Archiv -> deaktivieren
+0x02802 = Seite nicht vorhanden (%s). Signal <%s> noch nicht im Archiv
+0x02803 = Naechste Operation <%s>.
+0x02804 = %s
+
+0x0a800 = Hole Signal nicht erfolgreich. Status <%s> Naechste Operation <%s>.
+
+
+##########################################################################################
+# Procedure sendMsg
+# Proc Nr. 9 Meldungen: 0x02900-0x029ff
+#            Fehler:    0x0a900-0x0a9ff
+0x02900 = Oeffne Position fuer Signal <%s>.
+0x02901 = Oeffnen der Position fuer Signal <%s> erfolgreich.
+0x02902 = Schliesse Position fuer Signal <%s>.
+0x02903 = Schliessen der Position fuer Signal <%s> erfolgreich.
+
+0x0a900 = Oeffnen der Position fuer Signal <%s> nicht erfolgreich.
+0x0a901 = Schliessen der Position fuer Signal <%s> nicht erfolgreich.
 
 [english]

@@ -86,7 +86,7 @@ $VERSION = $prg->version($VERSION);
 my $cron = Configuration->config('Prg', 'Aktiv');
 while (1) {
   if (Schedule::Cron->get_next_execution_time($cron) > time) {
-    sleep Schedule::Cron->get_next_execution_time($cron) - time
+    sleep (Schedule::Cron->get_next_execution_time($cron) - time);
   }
   $prg->action();
 }

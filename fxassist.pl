@@ -38,7 +38,6 @@ use lib $Bin . "/lib/FXASSIST";
 use CmdLine;
 use Trace;
 use Configuration;
-use DBAccess;
 
 use Schedule::Cron;
 
@@ -67,9 +66,6 @@ $VERSION = Trace->new()->version($VERSION);
 # Config-Objekt: Liest und speichert die Initialisierungsdatei
 $VERSION = Configuration->new()->version($VERSION);
 
-# Datenbank-Objekt: Regelt dei Datenbankzugriffe
-$VERSION = DBAccess->new()->version($VERSION);
-
 # Kopie des Fehlerkanals erstellen zur gelegentlichen Abschaltung
 no warnings;
 sysopen(MYERR, "&STDERR", O_WRONLY);
@@ -86,7 +82,6 @@ if ($@) {
   Trace->Exit(0, 1, 0x0ffff, Configuration->config('Prg', 'Name'), $VERSION);
 }
 $VERSION = $prg->version($VERSION);
-DBAccess->set_pers_Var(Configuration->config('DB', 'MYDB').'.config', 'Start');
 
 while (1) {
   $prg->action();
@@ -96,7 +91,6 @@ while (1) {
 #$cron->add_entry(Configuration->config('Prg', 'Aktiv'));
 #$cron->run();
 
-DBAccess->set_pers_Var(Configuration->config('DB', 'MYDB').'.config', 'Ende '.CmdLine->new()->{ArgStrgRAW});
 Trace->Exit(0, 1, 0x00002, Configuration->config('Prg', 'Name'), $VERSION);
 
 exit 1;

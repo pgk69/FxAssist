@@ -13,6 +13,13 @@ package FXASSIST;
 # ToDo Ggf. LWP::RobotUA einsetzen
 # ToDo ZMQ::LibZMQ2 Fehler cpanm install fixen Alternativ: LibZMQ3 oder LibZMQ4 Library fuer MT4
 # ToDo ZeroMQ Telegramme definieren und auf beiden Seiten (Perl und MT4) implementieren
+# ToDo Nach Abbruch der Internetverbindung: Use of uninitialized value in pattern match (m//) at /Users/pgk/Documents/00_Eclipse/FxAssist/lib/FXASSIST.pm line 431.
+#      if (defined($self->{Store}->{Response}) &&
+#          $self->{Store}->{Response}->is_success() &&
+#          $self->{Store}->{Response}->header('title') =~ /$self->{Store}->{Location}->{Login}->{Title}/ &&
+#          $self->{Store}->{Response}->content() =~ m/form[^>]*name="$self->{Store}->{Location}->{Login}->{Form}->{Name}"/ &&
+#          $self->{Store}->{Response}->content() =~ m/form[^>]*action="([^"]*)"/) {
+# ToDo Reduzieren der Pollfrequenz nach Empfang eines Signals bis zum Ende des Signals (dazu ist Rueckmeldung des MT4 noetig, ob das Signal noch aktiv ist)
 #
 # $Id: $
 #-------------------------------------------------------------------------------------------------
@@ -46,7 +53,6 @@ use vars qw(@ISA);
 use Trace;
 use CmdLine;
 use Configuration;
-use DBAccess;
 use Utils;
 
 #
@@ -229,14 +235,10 @@ sub _init {
     $self->{Store}->{Location}->{Delay} = 0;
     if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
   }
+  
+  $self->{Store}->{Signal}->{Aktuell} = 0;
 
   Trace->Exit(1, 0, 0x08002, 'Location') if (!defined($self->{Store}->{Location}));
-  #Trace->Exit(1, 0, 0x08002, 'Location', 'URL')      if (!($self->{URL}      = Utils::extendString(Configuration->config('Location', 'URL'))));
-  #Trace->Exit(1, 0, 0x08002, 'Location', 'Login')    if (!($self->{Login}    = Utils::extendString(Configuration->config('Location', 'Login'), "URL|$self->{URL}")));
-  #Trace->Exit(1, 0, 0x08002, 'Location', 'Data')     if (!($self->{Data}     = Utils::extendString(Configuration->config('Location', 'Data'), "URL|$self->{URL}")));
-  #Trace->Exit(1, 0, 0x08002, 'Location', 'Name')     if (!($self->{Name}     = Configuration->config('Location', 'Name')));
-  #Trace->Exit(1, 0, 0x08002, 'Location', 'Password') if (!($self->{Password} = Configuration->config('Location', 'Password')));
-  
 }
 
 
@@ -265,50 +267,29 @@ sub DESTROY {
 }
 
 
-sub action {
+sub doDebugSignal {
   #################################################################
-  #     Dauerlaufrouting
-  #
+  #     Infos des Signals ausgeben.
+  #     Proc 7
   my $self = shift;
-
-  my $merker          = $self->{subroutine};
-  $self->{subroutine} = (caller(0))[3];
-  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, CmdLine->argument(0));
-  
-  my $rc = 0;
-  
-  if ($self->{Store}->{Location}->{Next} eq 'Login') {$self->doLogin()}
-  if ($self->{Store}->{Location}->{Next} eq 'Data')  {$self->getData()}
-
-  Trace->Trc('S', 2, 0x00002, $self->{subroutine});
-  $self->{subroutine} = $merker;
-
-  # Explizite Uebergabe des Returncodes noetig, da sonst ein Fehler auftritt
-  return $rc;
-}
-
-
-sub delay {
-  #################################################################
-  #     Verzoegert den Request falls noetig.
-  #     Proc 4
-  my $self = shift;
-  my $type = shift;
+  my $id   = shift;
 
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
   Trace->Trc('S', 3, 0x00001, $self->{subroutine}, CmdLine->argument(0));
 
   my $rc = 0;
-  
-  my $delay = $self->{Store}->{Location}->{$type}->{Delay} || 60;
-  while (time() - $self->{Store}->{Location}->{Delay} < $delay) {
-    Trace->Trc('I', 4, 0x02400, time() - $self->{Store}->{Location}->{Delay}, $delay);
-    sleep 10;
-  }
 
-  Trace->Trc('I', 4, 0x02401, time() - $self->{Store}->{Location}->{Delay}, $delay);
-  $self->{Store}->{Location}->{Delay} = time();
+  Trace->Trc('I', 1, 0x02700, "  Aktuell:          ", $self->{Store}->{Signal}->{Aktuell});
+  Trace->Trc('I', 1, 0x02700, "  ID:               ", $id);
+  Trace->Trc('I', 1, 0x02700, "  Gueltig:          ", $self->{Store}->{Signal}->{$id}->{Valid} ? 'Ja' : 'Nein');
+  Trace->Trc('I', 1, 0x02700, "  Aktiv:            ", $self->{Store}->{Signal}->{$id}->{Activ} ? 'Ja' : 'Nein');
+  Trace->Trc('I', 1, 0x02700, "  Signal:           ", $self->{Store}->{Signal}->{$id}->{Signal});
+  Trace->Trc('I', 1, 0x02700, "  Stand:            ", $self->{Store}->{Signal}->{$id}->{Stand});
+  Trace->Trc('I', 1, 0x02700, "  Zeit:             ", $self->{Store}->{Signal}->{$id}->{Zeit});
+  Trace->Trc('I', 1, 0x02700, "  Stopp-Loss-Marke: ", $self->{Store}->{Signal}->{$id}->{SL});
+  Trace->Trc('I', 1, 0x02700, "  Take-Profit_Marke:", $self->{Store}->{Signal}->{$id}->{TP});
+
 
   Trace->Trc('S', 3, 0x00002, $self->{subroutine});
   $self->{subroutine} = $merker;
@@ -317,22 +298,35 @@ sub delay {
 }
 
 
-sub doDebug {
+sub doDebugResponse {
   #################################################################
   #     Infos des Respondes ausgeben.
   #     Proc 1
-  my $self = shift;
-
+  my $self  = shift;
+  my $url   = shift;
+  my $param = join('|', @_);
+  
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
   Trace->Trc('S', 3, 0x00001, $self->{subroutine}, CmdLine->argument(0));
 
   my $rc = 0;
 
-  Trace->Trc('I', 4, 0x02100, $self->{Store}->{Response}->status_line());
-  Trace->Trc('I', 4, 0x02101, $self->{Store}->{Response}->headers_as_string());
-
-  Trace->Trc('I', 4, 0x02103, scalar(localtime($self->{Store}->{Response}->fresh_until( ))));
+  Trace->Trc('I', 4, 0x02100, 'URL',                  $url . $param);
+  Trace->Trc('I', 4, 0x02100, 'Status',               defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->status_line() : '-');
+  Trace->Trc('I', 4, 0x02100, 'Title',                defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->header('title') : 'Response nicht definiert.');
+  Trace->Trc('I', 4, 0x02100, 'Success',              defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->is_success() ? 'yes' : 'no'  : '-');
+  Trace->Trc('I', 4, 0x02100, 'Redirection',          defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->is_redirect() ? 'yes' : 'no' : '-');
+  Trace->Trc('I', 4, 0x02100, 'Header',               defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->headers_as_string() : '-');
+  Trace->Trc('I', 4, 0x02100, 'Document valid until', defined($self->{Store}->{Response}) ? scalar(localtime($self->{Store}->{Response}->fresh_until())) : '-');
+  my ($form, $action);
+  if (defined($self->{Store}->{Response})) {
+    if ($self->{Store}->{Response}->content() =~ m/form[^>]*name="($self->{Store}->{Location}->{Login}->{Form}->{Name})"/) {$form = $1};  
+    if ($self->{Store}->{Response}->content() =~ m/form[^>]*action="([^"]*)"/) {$action = $1};
+  }
+  Trace->Trc('I', 4, 0x02100, 'Form',   defined($form) ? $form : '-');
+  Trace->Trc('I', 4, 0x02100, 'Action', defined($action) ? $action : '-');
+  Trace->Trc('I', 5, 0x02100, 'Content', defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->decoded_content() : '-');
 
   Trace->Trc('S', 3, 0x00002, $self->{subroutine});
   $self->{subroutine} = $merker;
@@ -353,15 +347,23 @@ sub myGet {
 
   my $url = $type;
   if (defined($self->{Store}->{Location}->{$type})) {
-    # Redirect: kein delay noetig
+    # Delay noetig, falls kein Redirect oder Statusabfrage
     $url = $self->{Store}->{Location}->{$type}->{URL};
-    $self->delay($type);
+    my $delay = $self->{Store}->{Location}->{$type}->{Delay} || 60;
+    while (time() - $self->{Store}->{Location}->{Delay} < $delay) {
+      Trace->Trc('I', 4, 0x02400, time() - $self->{Store}->{Location}->{Delay}, $delay);
+      sleep 10;
+    }
+    Trace->Trc('I', 4, 0x02401, time() - $self->{Store}->{Location}->{Delay}, $delay);
+    $self->{Store}->{Location}->{Delay} = time();
   }
-  # $self->{Browser} = LWP::UserAgent->new( ) unless $self->{Browser};
-  my $resp = $self->{Browser}->get($url, @_);
-  $self->{Store}->{Response} = $resp;
+  $self->{Store}->{Response} = $self->{Browser}->get($url, @_);
+  # Ggf. Redirection folgen
+  while ($self->{Store}->{Response}->is_redirect) {
+    $self->{Store}->{Response} = $self->{Browser}->get($self->{Store}->{Response}->header('location'));
+  }
+  $self->doDebugResponse($url, @_) if Trace->debugLevel() > 3;
   if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
-  $self->doDebug() if Trace->debugLevel() > 3;
   
   Trace->Trc( 'S', 3, 0x00002, $self->{subroutine} );
   $self->{subroutine} = $merker;
@@ -383,12 +385,12 @@ sub myPost {
   $self->{subroutine} = (caller(0))[3];
   Trace->Trc('S', 3, 0x00001, $self->{subroutine}, CmdLine->argument(0));
 
-  $self->delay('Login');
-  # $self->{Browser} = LWP::UserAgent->new( ) unless $self->{Browser};
   my $resp = $self->{Browser}->post(@_);
   $self->{Store}->{Response} = $resp;
+  $self->doDebugResponse(@_) if Trace->debugLevel() > 3;
+#  # Ggf. Redirection folgen
+#  while ($self->{Store}->{Response}->is_redirect) {$self->myGet($self->{Store}->{Response}->header('location'))}
   if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
-  $self->doDebug() if Trace->debugLevel() > 3;
 
   Trace->Trc( 'S', 3, 0x00002, $self->{subroutine} );
   $self->{subroutine} = $merker;
@@ -396,6 +398,49 @@ sub myPost {
   #return ($resp->content, $resp->status_line, $resp->is_success, $resp) if wantarray;
   #return unless $resp->is_success;
   #return $resp->content;
+}
+
+
+sub action {
+  #################################################################
+  #     Dauerlaufrouting
+  #
+  my $self = shift;
+
+  my $merker          = $self->{subroutine};
+  $self->{subroutine} = (caller(0))[3];
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, CmdLine->argument(0));
+  
+  my $rc = 0;
+  
+  if ($self->{Store}->{Location}->{Next} eq 'Login')  {$self->doLogin()}
+  if ($self->{Store}->{Location}->{Next} eq 'GetIn')  {$self->doGetIn()}
+  if ($self->{Store}->{Location}->{Next} eq 'GetOut') {$self->doGetOut()}
+  
+  # Ein Signal hat 2 Flags. In Abhaengigkeit von diesen sind dem 
+  # MT4 unterschiedliche Instruktionen zu geben
+  # Valid  Activ  Instruktion
+  #   1      1    -
+  #   1      0    Sende Eroeffnungsauftrag fuer diese Position
+  #   0      1    Sende Schliessauftrag fuer diese Postition
+  #   0      0    Das Signal ist erledigt und wird aus der Datenstruktur entfernt
+  if (defined($self->{Store}->{Signal})) {
+    foreach my $id (keys(%{$self->{Store}->{Signal}})) {
+      if (defined($self->{Store}->{Signal}->{$id}) && (ref($self->{Store}->{Signal}->{$id}) eq 'HASH')) {
+        $self->doDebugSignal($id) if Trace->debugLevel() > 3;
+        if ( $self->{Store}->{Signal}->{$id}->{Valid} &&  $self->{Store}->{Signal}->{$id}->{Activ}) {next};
+        if ( $self->{Store}->{Signal}->{$id}->{Valid} && !$self->{Store}->{Signal}->{$id}->{Activ}) {$self->sendMsg('open',$id)}
+        if (!$self->{Store}->{Signal}->{$id}->{Valid} &&  $self->{Store}->{Signal}->{$id}->{Activ}) {$self->sendMsg('close',$id)}
+        if (!$self->{Store}->{Signal}->{$id}->{Valid} && !$self->{Store}->{Signal}->{$id}->{Activ}) {delete($self->{Store}->{Signal}->{$id})}
+      }
+    }
+  }
+  
+
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine});
+  $self->{subroutine} = $merker;
+
+  return $rc;
 }
 
 
@@ -411,17 +456,12 @@ sub doLogin {
 
   my $rc = 0;
 
-  if ($self->{Store}->{Location}->{Last} eq 'Login') {
-    Trace->Trc('I', 1, 0x02201);
-    # Das waere einfacher, aber es werden keine freundlichen Robots reingelassen
-    # $self->{Browser}->delay($self->{Store}->{Location}->{Login}->{Delay}/60);
-    $self->myGet('Login');
-  } else {
-    Trace->Trc('I', 4, 0x02200, $self->{Store}->{Location}->{Last} || 'Neustart', 'Login');
-    $self->{Store}->{Location}->{Last} = 'Login';
-    if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
-  }
+  # Holen der Login-Seite
+  Trace->Trc('I', 1, 0x02201);
+  $self->myGet('Login');
+  $self->{Store}->{Location}->{Last} = 'Login';
 
+  # Auswerten des Response und bei Erfolg Einloggen (Form ausfuellen und abschicken)
   if (defined($self->{Store}->{Response}) &&
       $self->{Store}->{Response}->is_success() &&
       $self->{Store}->{Response}->header('title') =~ /$self->{Store}->{Location}->{Login}->{Title}/ &&
@@ -434,58 +474,19 @@ sub doLogin {
       next if ($key eq "Name");
       $formvalues{$key} = Utils::extendString($value, , "URL|$self->{Store}->{Location}->{Login}->{URL}");
     }
+    # Einloggen
     $self->myPost($action, [%formvalues]);
-    while ($self->{Store}->{Response}->is_redirect) {
-      Trace->Trc('I', 4, 0x02205, $self->{Store}->{Response}->header('location'), $self->{Store}->{Response}->status_line());
-      $self->myGet($self->{Store}->{Response}->header('location'));
-      Trace->Trc('I', 4, 0x02208, $self->{Store}->{Response}->status_line());
-      $self->doDebug() if Trace->debugLevel() > 3;
-    }
     
-    my $response = $self->{Store}->{Response};
-    my $last = $response;
-    my $message;
-    while ($response) {
-      $message .= $response->code( ) . " after ";
-      $last = $response;
-      $response = $response->previous( );
-    }
-    $message .= "the original request, which was:\n" . $last->request->as_string;
-    Trace->Trc('I', 4, 0x02209, $message);
-    
+    # Auswerten den Einlog Responses und bei Erfolg Weiterschalten der Location auf GetIn
     if ($self->{Store}->{Response}->is_success &&
        ($self->{Store}->{Response}->header('title') =~ /$self->{Store}->{Location}->{$self->{Store}->{Location}->{Login}->{Next}}->{Title}/)) {
       Trace->Trc('I', 1, 0x0220a, $self->{Store}->{Response}->status_line(), $self->{Store}->{Location}->{Login}->{Next});
-      Trace->Trc('I', 4, 0x02206, $self->{Store}->{Response}->headers_as_string());
+#      Trace->Trc('I', 4, 0x02206, $self->{Store}->{Response}->headers_as_string());
       $self->{Store}->{Location}->{Next} = $self->{Store}->{Location}->{Login}->{Next};
       if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
       $rc = 1;    
-    } else {
-      Trace->Trc('I', 4, 0x02204, 'Status',      defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->status_line() : '-');
-      Trace->Trc('I', 4, 0x02204, 'Title',       defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->header('title') : 'Response nicht definiert.');
-      Trace->Trc('I', 4, 0x02204, 'Success',     defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->is_success() ? 'yes' : 'no'  : '-');
-      Trace->Trc('I', 4, 0x02204, 'Redirection', defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->is_redirect() ? 'yes' : 'no' : '-');
     }
   } else {
-    Trace->Trc('I', 4, 0x02204, 'Status',      defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->status_line() : 'Neustart oder undefinierter Fehler');
-    Trace->Trc('I', 4, 0x02204, 'Title',       defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->header('title') : 'Response nicht definiert.');
-    Trace->Trc('I', 4, 0x02204, 'Success',     defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->is_success() ? 'yes' : 'no'  : '-');
-    Trace->Trc('I', 4, 0x02204, 'Redirection', defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->is_redirect() ? 'yes' : 'no' : '-');
-    my $dummy;
-    if (defined($self->{Store}->{Response})) {
-      $dummy = $self->{Store}->{Response}->content() =~ m/form[^>]*name="$self-->{Store}>{Location}->{Login}->{Form}"/;  
-    }
-    Trace->Trc('I', 4, 0x02204, 'Form ' . $self->{Store}->{Location}->{Login}->{Form}, defined($dummy) ? 'found' : 'not found');
-    $dummy = undef;
-    if (defined($self->{Store}->{Response})) {
-      if ($self->{Store}->{Response}->content() =~ m/form[^>]*action="([^"]*)"/) {
-        $dummy = $1
-      }
-    }
-    Trace->Trc('I', 4, 0x02204, 'Action', defined($dummy) ? $dummy : 'not found');
-
-
-    Trace->Trc('I', 5, 0x02204, 'Content',     defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->decoded_content() : '-');
     if (defined($self->{Store}->{Response}) && !$self->{Store}->{Response}->is_success()) {
       Trace->Trc('I', 1, 0x0a200, $self->{Store}->{Response}->status_line(), 'Login'); 
     }
@@ -494,12 +495,11 @@ sub doLogin {
   Trace->Trc('S', 2, 0x00002, $self->{subroutine});
   $self->{subroutine} = $merker;
 
-  # Explizite Uebergabe des Returncodes noetig, da sonst ein Fehler auftritt
   return $rc;
 }
 
 
-sub getData {
+sub doGetIn {
   #################################################################
   #     Datenabruf
   #     Proc 3
@@ -511,22 +511,24 @@ sub getData {
   
   my $rc = 0;
 
-  if ($self->{Store}->{Location}->{Last} eq 'Data') {
-    Trace->Trc('I', 2, 0x02301);
-    # Das waere einfacher, aber es werden keine freundlichen Robots reingelassen
-    # $self->{Browser}->delay($self->{Store}->{Location}->{Data}->{Delay}/60);
-    $self->myGet('Data');
-  } else {
-    Trace->Trc('I', 4, 0x02300, $self->{Store}->{Location}->{Last} || 'Neustart', 'Data');
-    $self->{Store}->{Location}->{Last} = 'Data';
+  # Ermitteln des aktuellen Wertes
+  if ($self->{Store}->{Location}->{Last} eq 'Login') {
+    # Seite wurde bereits im Rahmen des Login geholt, daher kein erneutes Laden,
+    # falls wir von der Location Login kommen
+    Trace->Trc('I', 4, 0x02300, $self->{Store}->{Location}->{Last} || 'Neustart', 'GetIn');
+    $self->{Store}->{Location}->{Last} = 'GetIn';
     if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
+  } else {
+    Trace->Trc('I', 2, 0x02301);
+    $self->myGet('GetIn');
   }
-  
+
+  # Holen der Seite erfolgreich ?  
   if (defined($self->{Store}->{Response}) &&
       $self->{Store}->{Response}->is_success && 
-      $self->{Store}->{Response}->header('title') =~ /$self->{Store}->{Location}->{Data}->{Title}/) {
-    Trace->Trc('I', 1, 0x0230a, $self->{Store}->{Response}->status_line(), 'Data');
-    Trace->Trc('I', 4, 0x02303, $self->{Store}->{Response}->status_line());
+      $self->{Store}->{Response}->header('title') =~ /$self->{Store}->{Location}->{GetIn}->{Title}/) {
+    Trace->Trc('I', 1, 0x0230a, $self->{Store}->{Response}->status_line(), 'GetIn');
+#    Trace->Trc('I', 4, 0x02303, $self->{Store}->{Response}->status_line());
  
     # Auswertung der Daten
     my %signal;
@@ -534,7 +536,7 @@ sub getData {
     open IN, '<', \$content or die $!;
     while (<IN>) {
       my $line = $_;
-      while ((my $key, my $value) = each(%{$self->{Store}->{Location}->{Data}->{Field}})) {
+      while ((my $key, my $value) = each(%{$self->{Store}->{Location}->{GetIn}->{Field}})) {
         if ($line =~ /$value/) {
           $signal{$key} = decode_entities($1);
           $signal{$key} =~ s/([^[:ascii:]]+)/unidecode($1)/ge;
@@ -543,32 +545,30 @@ sub getData {
     }
     close(IN);
 
-    # Verlgeich mit dem alten Signal
-    if (!defined($self->{Store}->{Signal}->{ID}) || ($self->{Store}->{Signal}->{ID} ne $signal{ID})) {
-      if (!defined($self->{Store}->{Signal}->{ID})) {
-        print "Erstsignal\n";
-      } else {
-        print "Neues Signal\n";
-      }
-      undef($self->{Store}->{Signal});
-      while ((my $key, my $value) = each %signal) {$self->{Store}->{Signal}->{$key} = $value}  
+    if (defined($signal{ID}) && $signal{ID} && ($self->{Store}->{Signal}->{Aktuell} ne $signal{ID})) {
+      # Neues Signal      
+      Trace->Trc('I', 1, 0x02302, $signal{ID});
+      undef($self->{Store}->{Signal}->{$signal{ID}});
+      # Neues Signal vorhanden. Altes Signal ist damit ungueltig
+      $self->{Store}->{Signal}->{$self->{Store}->{Signal}->{Aktuell}}->{Valid} = 0 if ($self->{Store}->{Signal}->{Aktuell});
+      $self->{Store}->{Signal}->{Aktuell} = $signal{ID};
+      $self->{Store}->{Signal}->{$signal{ID}}->{Valid} = 1;
+      $self->{Store}->{Signal}->{$signal{ID}}->{Activ} = 0;
+      while ((my $key, my $value) = each %signal) {$self->{Store}->{Signal}->{$signal{ID}}->{$key} = $value unless ($key eq 'ID')}  
       if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}};
-      Trace->Trc('I', 1, 0x02310, "  ID:                " . $self->{Store}->{Signal}->{ID});
-      Trace->Trc('I', 1, 0x02310, "  Signal:            " . $self->{Store}->{Signal}->{Signal});
-      Trace->Trc('I', 1, 0x02310, "  Stand:             " . $self->{Store}->{Signal}->{Stand});
-      Trace->Trc('I', 1, 0x02310, "  Zeit:              " . $self->{Store}->{Signal}->{Zeit});
-      Trace->Trc('I', 1, 0x02310, "  Stopp-Loss-Marke:  " . $self->{Store}->{Signal}->{SL});
-      Trace->Trc('I', 1, 0x02310, "  Take-Profit_Marke: " . $self->{Store}->{Signal}->{TP});
+    }
+    $self->doDebugSignal($signal{ID}) if Trace->debugLevel() > 3;
+    
+    if (defined($self->{Store}->{Signal}->{$signal{ID}})) {
+      # Holen des Signals erfolgreich: Weiter mit Checken der Historienseite
+      $self->{Store}->{Location}->{Next} = 'GetOut';
+      if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
     }
   } else {
-    $self->doDebug();
+    # Holen der Werte nicht erfolgreich: Weiterschalten mit Login
     if (defined($self->{Store}->{Response}) && !$self->{Store}->{Response}->is_success()) {
       Trace->Trc('I', 1, 0x0a300, $self->{Store}->{Response}->status_line(), 'Login'); 
     }
-    Trace->Trc('I', 4, 0x02304, 'Status',      defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->status_line() : 'Neustart oder undefinierter Fehler');
-    Trace->Trc('I', 4, 0x02304, 'Title',       defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->header('title') : 'Response nicht definiert.');
-    Trace->Trc('I', 4, 0x02304, 'Success',     defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->is_success() ? 'yes' : 'no'  : '-');
-    Trace->Trc('I', 4, 0x02304, 'Redirection', defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->is_redirect() ? 'yes' : 'no' : '-');
     $self->{Store}->{Location}->{Next} = 'Login';
     if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
   }
@@ -576,7 +576,116 @@ sub getData {
   Trace->Trc('S', 2, 0x00002, $self->{subroutine});
   $self->{subroutine} = $merker;
 
-  # Explizite Uebergabe des Returncodes noetig, da sonst ein Fehler auftritt
+  return $rc;
+}
+
+
+sub doGetOut {
+  #################################################################
+  #     Datenabruf
+  #     Proc 5
+  # Es kann vorkommen, das wir den Ausstieg nicht erreicht haben.
+  # Dies muß dann unmittelbar nachgeholt werden.
+  # Der Ausstieg ist erreicht falls
+  #   - diese Seite existiert oder
+  #   - die aktuelle Signal-ID höher ist als unsere (wird in doGetIn entschieden)
+  my $self = shift;
+
+  my $merker          = $self->{subroutine};
+  $self->{subroutine} = (caller(0))[3];
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, CmdLine->argument(0));
+  
+  my $rc = 0;
+
+  $self->{Store}->{Location}->{Last} = 'GetOut';
+  
+  if (defined($self->{Store}->{Signal})) {
+    foreach my $id (keys(%{$self->{Store}->{Signal}})) {
+      if (defined($self->{Store}->{Signal}->{$id}) && (ref($self->{Store}->{Signal}->{$id}) eq 'HASH')) {      
+        $self->doDebugSignal($id) if Trace->debugLevel() > 3;
+        next unless ($self->{Store}->{Signal}->{$id}->{Valid});
+        my $zeit = $self->{Store}->{Signal}->{$id}->{Zeit};
+        if ($zeit =~ /([0-9]{2})\.([0-9]{2})\.([0-9]{4})/) {
+          my ($d, $m, $j) = ($1, $2, $3);
+          my $url = Utils::extendString($self->{Store}->{Location}->{GetOut}->{URL}, "ID|$id|DAY|$d|MONTH|$m|YEAR|$j");
+          Trace->Trc('I', 2, 0x02501, $id);
+          $self->myGet($url);
+          if (defined($self->{Store}->{Response})) {
+            Trace->Trc('I', 1, 0x02502, $self->{Store}->{Response}->status_line(), $id);
+            # Historieneintrag vorhanden. Signal ist damit ungueltig
+            $self->{Store}->{Signal}->{$id}->{Valid} = 0;
+          } else {
+            Trace->Trc('I', 4, 0x02503, $self->{Store}->{Response}->status_line(), $id);
+          }
+        }
+      }
+    }
+  }
+  Trace->Trc('I', 4, 0x0250a, 'GetIn');
+  # Unabhaengig vom Ergebnis des Check weitermachen mit der Ermittelung des aktuellen Wertes
+  $self->{Store}->{Location}->{Next} = 'GetIn';
+  if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
+
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine});
+  $self->{subroutine} = $merker;
+
+  return $rc;
+}
+
+
+sub sendMsg {
+  #################################################################
+  #     Kommunikation mit dem MT4
+  #     Proc 6
+  #     Eingabe: Operation: open|close
+  #              ID: Signal-ID
+  #     
+  #     Die eigentliche Kommunikation findet in sub IO() statt
+  #     Bei Erfolg sollte sub IO eine 1 zurueckmelden, bei Misserfolg eine 0
+  #     Im Erfolgsfall open muß $self->{Store}->{Signal}->{$id}->{Activ} auf 1 gesetzt werden.
+  #     Im Erfolgsfall close muß $self->{Store}->{Signal}->{$id}->{Activ} auf 0 gesetzt werden.
+  #
+  # ToDo Rueckmeldung des MT4: Position offen/geschlossen holen und auswerten
+  my $self = shift;
+  my $op   = shift;
+  my $id   = shift;
+  
+  sub IO() {
+    return 1
+  } 
+
+  my $merker          = $self->{subroutine};
+  $self->{subroutine} = (caller(0))[3];
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, CmdLine->argument(0));
+  
+  my $rc = 0;
+  
+  if ($op eq 'open') {
+    Trace->Trc('I', 1, 0x02600, $id);
+    my $oprc = IO();
+    if ($oprc) {
+      # Open erfolgreich. Signal ist aktiviert
+      $self->{Store}->{Signal}->{$id}->{Activ} = 1;
+      Trace->Trc('I', 1, 0x02601, $id);
+    } else {
+      Trace->Trc('I', 1, 0x0a600, $id);
+    }
+  }
+  if ($op eq 'close') {
+    Trace->Trc('I', 1, 0x02602, $id);
+    my $oprc = IO();
+    if ($oprc) {
+      # Close erfolgreich. Signal ist deaktiviert
+      $self->{Store}->{Signal}->{$id}->{Activ} = 0;
+      Trace->Trc('I', 1, 0x02603, $id);
+    } else {
+      Trace->Trc('I', 1, 0x0a601, $id);
+    }
+  }
+
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine});
+  $self->{subroutine} = $merker;
+
   return $rc;
 }
 

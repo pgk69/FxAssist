@@ -20,6 +20,7 @@ package FXASSIST;
 #          $self->{Store}->{Response}->content() =~ m/form[^>]*name="$self->{Store}->{Location}->{Login}->{Form}->{Name}"/ &&
 #          $self->{Store}->{Response}->content() =~ m/form[^>]*action="([^"]*)"/) {
 # Done Reduzieren der Pollfrequenz nach Empfang eines Signals bis zum Ende des Signals (dazu ist Rueckmeldung des MT4 noetig, ob das Signal noch aktiv ist) -> Lazyfaktor
+# ToDo Ergebnis des ZMQ Transfers ermitteln (kein Returncode verfuegbar) 
 #
 # $Id: $
 #-------------------------------------------------------------------------------------------------
@@ -71,6 +72,8 @@ use Text::Unidecode;
 use Storable;
 use ZMQ::LibZMQ4;
 use ZMQ::FFI;
+use ZMQ::FFI::Constants qw(ZMQ_PUB ZMQ_SUB ZMQ_DONTWAIT);
+use Time::HiRes q(usleep);
 
 #
 # Konstantendefinition
@@ -194,6 +197,19 @@ sub _init {
     }
   }
   
+  # ZeroMQ Initialisierung
+  #### pub/sub ####
+  ### here pub ####
+  $self->{ZMQ}->{Endpoint} = Utils::extendString(Configuration->config('ZMQ', 'Endpoint'), "BIN|$Bin|SCRIPT|" . uc($Script));
+  $self->{ZMQ}->{Context}  = ZMQ::FFI->new();
+  $self->{ZMQ}->{PubSock}  = $self->{ZMQ}->{Context}->socket(ZMQ_PUB);
+  $self->{ZMQ}->{PubSock}->bind($self->{ZMQ}->{Endpoint});
+  
+  # Subscriber must do
+  # $self->{ZMQ}->{SubSock} = $self->{ZMQ}->{Context}->socket(ZMQ_SUB);
+  # $self->{ZMQ}->{SubSock}->connect($self->{ZMQ}->{Endpoint});
+ 
+   
   # Mit dem RobotUA wird das Warten automatisiert; leider kommen wir damit nicht rein
   # $self->{Browser} = LWP::RobotUA->new('Me/1.0', 'a@b.c');
   # $self->{Browser}->delay(60/60);  # avoid polling more often than every 1 minute
@@ -408,8 +424,6 @@ sub myPost {
     $self->{Store}->{Response} = $self->{Browser}->get($self->{Store}->{Response}->header('location'));
   }
   $self->doDebugResponse(@_) if Trace->debugLevel() > 3;
-#  # Ggf. Redirection folgen
-#  while ($self->{Store}->{Response}->is_redirect) {$self->myGet($self->{Store}->{Response}->header('location'))}
   if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
 
   Trace->Trc( 'S', 3, 0x00002, $self->{subroutine} );
@@ -438,8 +452,8 @@ sub action {
   if ($self->{Store}->{Location}->{Next} eq 'GetIn')  {$self->doGetIn()}
   if ($self->{Store}->{Location}->{Next} eq 'GetOut') {$self->doGetOut()}
   
-  # Ein Signal hat 2 Flags. In Abhaengigkeit von diesen sind dem 
-  # MT4 unterschiedliche Instruktionen zu geben
+  # Ein Signal hat 2 Flags. In Abhaengigkeit von diesen sind  
+  # unterschiedliche Instruktionen zu geben
   # Valid  Activ  Instruktion
   #   1      1    -
   #   1      0    Sende Eroeffnungsauftrag fuer diese Position
@@ -502,7 +516,6 @@ sub doLogin {
     if ($self->{Store}->{Response}->is_success &&
        ($self->{Store}->{Response}->header('title') =~ /$self->{Store}->{Location}->{$self->{Store}->{Location}->{Login}->{Next}}->{Title}/)) {
       Trace->Trc('I', 1, 0x02602, $self->{Store}->{Response}->status_line(), $self->{Store}->{Location}->{Login}->{Next});
-#      Trace->Trc('I', 4, 0x02206, $self->{Store}->{Response}->headers_as_string());
       $self->{Store}->{Location}->{Next} = $self->{Store}->{Location}->{Login}->{Next};
       if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
       $rc = 1;    
@@ -670,37 +683,46 @@ sub sendMsg {
   my $op   = shift;
   my $id   = shift;
   
-  sub IO() {
-    return 1
-  } 
-
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
   Trace->Trc('S', 2, 0x00001, $self->{subroutine}, CmdLine->argument(0));
   
   my $rc = 0;
   
-  if ($op eq 'open') {
-    Trace->Trc('I', 1, 0x02900, $id);
-    my $oprc = IO();
-    if ($oprc) {
-      # Open erfolgreich. Signal ist aktiviert
-      $self->{Store}->{Signal}->{$id}->{Activ} = 1;
-      Trace->Trc('I', 1, 0x02901, $id);
-    } else {
-      Trace->Trc('I', 1, 0x0a900, $id);
+  my $telegramm = "OP|$op|ID|$id|";
+  if (defined($self->{Store}->{Signal}->{$id}) && (ref($self->{Store}->{Signal}->{$id}) eq 'HASH')) {
+    while ((my $key, my $value) = each(%{$self->{Store}->{Signal}->{$id}})) {
+      $telegramm .= "$key|$value|";
     }
   }
-  if ($op eq 'close') {
-    Trace->Trc('I', 1, 0x02902, $id);
-    my $oprc = IO();
-    if ($oprc) {
-      # Close erfolgreich. Signal ist deaktiviert
-      $self->{Store}->{Signal}->{$id}->{Activ} = 0;
-      Trace->Trc('I', 1, 0x02903, $id);
-    } else {
-      Trace->Trc('I', 1, 0x0a901, $id);
-    }
+
+  Trace->Trc('I', 1, 0x02900, $op, $id, $telegramm);
+
+  my $oprc = $self->{ZMQ}->{PubSock}->send($telegramm, ZMQ_DONTWAIT);
+  # ToDo Ergebnis des ZMQ Transfers ermitteln (kein Returncode verfuegbar) 
+  $oprc = 1; 
+  #until ($self->{ZMQ}->{SubSock}->has_pollin) {
+  #  # compensate for slow subscriber
+  #  usleep 100_000;
+  #  $self->{ZMQ}->{PubSock}->send('ohhai', ZMQ_DONTWAIT);
+  #}
+
+  # Subscriber must do
+  # Initialsation
+  # $self->{ZMQ}->{SubSock}->subscribe('');
+    
+  # Data Transfer
+  # say $self->{ZMQ}->{SubSock}->recv();
+
+  # CleanUp
+  # $self->{ZMQ}->{SubSock}->unsubscribe('');
+
+  if ($oprc) {
+    # Operation erfolgreich. Signal ist aktiviert(open) oder deaktiviert(close)
+    $self->{Store}->{Signal}->{$id}->{Activ} = ($op eq 'open');
+    Trace->Trc('I', 1, 0x02901, $op, $id);
+  } else {
+    Trace->Trc('I', 1, 0x0a900, $op, $id);
   }
 
   Trace->Trc('S', 2, 0x00002, $self->{subroutine});
@@ -708,6 +730,7 @@ sub sendMsg {
 
   return $rc;
 }
+
 
 
 1;

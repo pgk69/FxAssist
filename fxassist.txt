@@ -180,12 +180,9 @@
 # Procedure sendMsg
 # Proc Nr. 9 Meldungen: 0x02900-0x029ff
 #            Fehler:    0x0a900-0x0a9ff
-0x02900 = Oeffne Position fuer Signal <%s>.
-0x02901 = Oeffnen der Position fuer Signal <%s> erfolgreich.
-0x02902 = Schliesse Position fuer Signal <%s>.
-0x02903 = Schliessen der Position fuer Signal <%s> erfolgreich.
+0x02900 = %s Position fuer Signal <%s>. Telegramm: <%s>
+0x02901 = %s Position fuer Signal <%s> erfolgreich.
 
-0x0a900 = Oeffnen der Position fuer Signal <%s> nicht erfolgreich.
-0x0a901 = Schliessen der Position fuer Signal <%s> nicht erfolgreich.
+0x0a900 = %s Position fuer Signal <%s> nicht erfolgreich.
 
 [english]

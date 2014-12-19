@@ -9,7 +9,6 @@ package FXASSIST;
 #
 # Done Implentierung cronaehnlicher Aktivitaetssteuerung (Schedule::Cron?)
 # ToDo Storables zun Laufen bringen falls moeglich
-# Done Cookies zum Laufen bringen
 # ToDo Ggf. LWP::RobotUA einsetzen
 # ToDo ZMQ::LibZMQ2 Fehler cpanm install fixen Alternativ: LibZMQ3 oder LibZMQ4 Library fuer MT4
 # ToDo ZeroMQ Telegramme definieren und auf beiden Seiten (Perl und MT4) implementieren
@@ -19,7 +18,6 @@ package FXASSIST;
 #          $self->{Store}->{Response}->header('title') =~ /$self->{Store}->{Location}->{Login}->{Title}/ &&
 #          $self->{Store}->{Response}->content() =~ m/form[^>]*name="$self->{Store}->{Location}->{Login}->{Form}->{Name}"/ &&
 #          $self->{Store}->{Response}->content() =~ m/form[^>]*action="([^"]*)"/) {
-# Done Reduzieren der Pollfrequenz nach Empfang eines Signals bis zum Ende des Signals (dazu ist Rueckmeldung des MT4 noetig, ob das Signal noch aktiv ist) -> Lazyfaktor
 # ToDo Ergebnis des ZMQ Transfers ermitteln (kein Returncode verfuegbar) 
 #
 # $Id: $
@@ -56,6 +54,8 @@ use CmdLine;
 use Configuration;
 use Utils;
 
+use MQL4_ZMQ;
+
 #
 # Module
 #
@@ -70,10 +70,6 @@ use utf8;
 use Text::Unidecode;
 
 use Storable;
-use ZMQ::LibZMQ4;
-use ZMQ::FFI;
-use ZMQ::FFI::Constants qw(ZMQ_PUB ZMQ_SUB ZMQ_DONTWAIT);
-use Time::HiRes q(usleep);
 
 #
 # Konstantendefinition
@@ -145,7 +141,7 @@ sub _init {
     foreach (split(/ /, Configuration->config('Prg', 'Plugin'))) {
 
       # Falls ein Modul existiert
-      if (-e "$self->{Pfad}/plugins/${_}.pm") {
+      if (-e "$Bin/plugins/${_}.pm") {
 
         # Einbinden des Moduls
         require $_ . '.pm';
@@ -197,18 +193,8 @@ sub _init {
     }
   }
   
-  # ZeroMQ Initialisierung
-  #### pub/sub ####
-  ### here pub ####
-  $self->{ZMQ}->{Endpoint} = Utils::extendString(Configuration->config('ZMQ', 'Endpoint'), "BIN|$Bin|SCRIPT|" . uc($Script));
-  $self->{ZMQ}->{Context}  = ZMQ::FFI->new();
-  $self->{ZMQ}->{PubSock}  = $self->{ZMQ}->{Context}->socket(ZMQ_PUB);
-  $self->{ZMQ}->{PubSock}->bind($self->{ZMQ}->{Endpoint});
-  
-  # Subscriber must do
-  # $self->{ZMQ}->{SubSock} = $self->{ZMQ}->{Context}->socket(ZMQ_SUB);
-  # $self->{ZMQ}->{SubSock}->connect($self->{ZMQ}->{Endpoint});
- 
+  # MQL4_ZMQ Einbindungung
+  $self->{ZMQ} = new MQL4_ZMQ;
    
   # Mit dem RobotUA wird das Warten automatisiert; leider kommen wir damit nicht rein
   # $self->{Browser} = LWP::RobotUA->new('Me/1.0', 'a@b.c');
@@ -464,14 +450,31 @@ sub action {
       if (defined($self->{Store}->{Signal}->{$id}) && (ref($self->{Store}->{Signal}->{$id}) eq 'HASH')) {
         $self->doDebugSignal($id) if Trace->debugLevel() > 3;
         if ( $self->{Store}->{Signal}->{$id}->{Valid} &&  $self->{Store}->{Signal}->{$id}->{Activ}) {next};
-        if ( $self->{Store}->{Signal}->{$id}->{Valid} && !$self->{Store}->{Signal}->{$id}->{Activ}) {$self->sendMsg('open',$id)}
-        if (!$self->{Store}->{Signal}->{$id}->{Valid} &&  $self->{Store}->{Signal}->{$id}->{Activ}) {$self->sendMsg('close',$id)}
+        if ( $self->{Store}->{Signal}->{$id}->{Valid} && !$self->{Store}->{Signal}->{$id}->{Activ}) {
+          # Im Erfolgsfall open muß $self->{Store}->{Signal}->{$id}->{Activ} auf 1 gesetzt werden.
+          # @@@ Parameter korrekt ermitteln und setzen
+          $self->{Store}->{Signal}->{$id}->{Activ} = $self->{MQL4_ZMQ}->cmd(cmd          => 'set',
+                                                                            type         => 'Orderart', 
+                                                                            pair         => 'Symbol', 
+                                                                            open_price   => 'Eroeffnungskurs',
+                                                                            slippage     => 'Slippage', 
+                                                                            magic_number => 'MagicNumber', 
+                                                                            comment      => 'Kommentar', 
+                                                                            take_profit  => 'TakeProfit', 
+                                                                            stop_loss    => 'StoppLoss', 
+                                                                            lot          => 'Lots');
+        }
+        if (!$self->{Store}->{Signal}->{$id}->{Valid} &&  $self->{Store}->{Signal}->{$id}->{Activ}) {
+          # Im Erfolgsfall close muß $self->{Store}->{Signal}->{$id}->{Activ} auf 0 gesetzt werden.
+          # @@@ Parameter korrekt ermitteln und setzen
+          $self->{Store}->{Signal}->{$id}->{Activ} = !$self->{MQL4_ZMQ}->cmd(cmd          => 'unset',
+                                                                             ticket       => 'Ticket');
+        }
         if (!$self->{Store}->{Signal}->{$id}->{Valid} && !$self->{Store}->{Signal}->{$id}->{Activ}) {delete($self->{Store}->{Signal}->{$id})}
       }
     }
   }
   
-
   Trace->Trc('S', 2, 0x00002, $self->{subroutine});
   $self->{subroutine} = $merker;
 
@@ -658,72 +661,6 @@ sub doGetOut {
   # Unabhaengig vom Ergebnis des Check weitermachen mit der Ermittelung des aktuellen Wertes
   $self->{Store}->{Location}->{Next} = 'GetIn';
   if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
-
-  Trace->Trc('S', 2, 0x00002, $self->{subroutine});
-  $self->{subroutine} = $merker;
-
-  return $rc;
-}
-
-
-sub sendMsg {
-  #################################################################
-  #     Kommunikation mit dem MT4
-  #     Proc 9
-  #     Eingabe: Operation: open|close
-  #              ID: Signal-ID
-  #     
-  #     Die eigentliche Kommunikation findet in sub IO() statt
-  #     Bei Erfolg sollte sub IO eine 1 zurueckmelden, bei Misserfolg eine 0
-  #     Im Erfolgsfall open muß $self->{Store}->{Signal}->{$id}->{Activ} auf 1 gesetzt werden.
-  #     Im Erfolgsfall close muß $self->{Store}->{Signal}->{$id}->{Activ} auf 0 gesetzt werden.
-  #
-  # ToDo Rueckmeldung des MT4: Position offen/geschlossen holen und auswerten
-  my $self = shift;
-  my $op   = shift;
-  my $id   = shift;
-  
-  my $merker          = $self->{subroutine};
-  $self->{subroutine} = (caller(0))[3];
-  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, CmdLine->argument(0));
-  
-  my $rc = 0;
-  
-  my $telegramm = "OP|$op|ID|$id|";
-  if (defined($self->{Store}->{Signal}->{$id}) && (ref($self->{Store}->{Signal}->{$id}) eq 'HASH')) {
-    while ((my $key, my $value) = each(%{$self->{Store}->{Signal}->{$id}})) {
-      $telegramm .= "$key|$value|";
-    }
-  }
-
-  Trace->Trc('I', 1, 0x02900, $op, $id, $telegramm);
-
-  my $oprc = $self->{ZMQ}->{PubSock}->send($telegramm, ZMQ_DONTWAIT);
-  # ToDo Ergebnis des ZMQ Transfers ermitteln (kein Returncode verfuegbar) 
-  $oprc = 1; 
-  #until ($self->{ZMQ}->{SubSock}->has_pollin) {
-  #  # compensate for slow subscriber
-  #  usleep 100_000;
-  #  $self->{ZMQ}->{PubSock}->send('ohhai', ZMQ_DONTWAIT);
-  #}
-
-  # Subscriber must do
-  # Initialsation
-  # $self->{ZMQ}->{SubSock}->subscribe('');
-    
-  # Data Transfer
-  # say $self->{ZMQ}->{SubSock}->recv();
-
-  # CleanUp
-  # $self->{ZMQ}->{SubSock}->unsubscribe('');
-
-  if ($oprc) {
-    # Operation erfolgreich. Signal ist aktiviert(open) oder deaktiviert(close)
-    $self->{Store}->{Signal}->{$id}->{Activ} = ($op eq 'open');
-    Trace->Trc('I', 1, 0x02901, $op, $id);
-  } else {
-    Trace->Trc('I', 1, 0x0a900, $op, $id);
-  }
 
   Trace->Trc('S', 2, 0x00002, $self->{subroutine});
   $self->{subroutine} = $merker;

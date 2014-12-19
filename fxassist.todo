@@ -1,0 +1,21 @@
+Intern:
+
+* Storables zun Laufen bringen falls moeglich
+
+* Ggf. LWP::RobotUA einsetzen
+
+* ZMQ::LibZMQ2 Fehler cpanm install fixen Alternativ: LibZMQ3 oder LibZMQ4 Library fuer MT4
+
+* Nach Abbruch der Internetverbindung: Use of uninitialized value in pattern match (m//) at /Users/pgk/Documents/00_Eclipse/FxAssist/lib/FXASSIST.pm line 431.
+
+
+Kommunikation MT4:
+
+* ZeroMQ Telegramme definieren und auf beiden Seiten (Perl und MT4) implementieren
+
+* Ergebnis des ZMQ Transfers ermitteln (kein Returncode verfuegbar) 
+
+* Rueckmeldung des MT4: Position offen/geschlossen holen und auswerten
+
+* Ergebnis des ZMQ Transfers ermitteln (kein Returncode verfuegbar) 
+

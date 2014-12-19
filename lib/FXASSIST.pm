@@ -194,7 +194,24 @@ sub _init {
   }
   
   # MQL4_ZMQ Einbindungung
-  $self->{ZMQ} = new MQL4_ZMQ;
+  $self->{MQL4_ZMQ} = MQL4_ZMQ->new();
+  # Lesen der aktuellen Orders
+  $self->{MQL4_ZMQ}->cmd('cmd',   'parameter',
+                         'value', 'get_info=1');
+  my $status  = $self->{MQL4_ZMQ}->getInfo('status', 'bridge');
+  my $account = $self->{MQL4_ZMQ}->getInfo('info',   'account');
+  my $orders  = $self->{MQL4_ZMQ}->getInfo('info',   'order');
+  my $ema     = $self->{MQL4_ZMQ}->getInfo('info',   'ema');
+  $self->{MQL4_ZMQ}->cmd('cmd',   'parameter',
+                         'value', 'get_info=0');
+  
+  # @@@ Alle Orders durchgehen und die
+  while ((my $key, my $value) = each(%{$orders})) {
+    if ($key eq 'comment' && $value =~ /Opened by FxAssist:ST:(.*)/) {
+      $self->{Store}->{Signal}->{$1}->{Activ} = 1;
+    }
+  }                        
+           
    
   # Mit dem RobotUA wird das Warten automatisiert; leider kommen wir damit nicht rein
   # $self->{Browser} = LWP::RobotUA->new('Me/1.0', 'a@b.c');
@@ -453,22 +470,42 @@ sub action {
         if ( $self->{Store}->{Signal}->{$id}->{Valid} && !$self->{Store}->{Signal}->{$id}->{Activ}) {
           # Im Erfolgsfall open muß $self->{Store}->{Signal}->{$id}->{Activ} auf 1 gesetzt werden.
           # @@@ Parameter korrekt ermitteln und setzen
-          $self->{Store}->{Signal}->{$id}->{Activ} = $self->{MQL4_ZMQ}->cmd(cmd          => 'set',
-                                                                            type         => 'Orderart', 
-                                                                            pair         => 'Symbol', 
-                                                                            open_price   => 'Eroeffnungskurs',
-                                                                            slippage     => 'Slippage', 
-                                                                            magic_number => 'MagicNumber', 
-                                                                            comment      => 'Kommentar', 
-                                                                            take_profit  => 'TakeProfit', 
-                                                                            stop_loss    => 'StoppLoss', 
-                                                                            lot          => 'Lots');
+          #my $ticket = $self->{MQL4_ZMQ}->cmd(cmd          => 'set',
+          #                                    type         => 'Orderart', 
+          #                                    pair         => 'Symbol', 
+          #                                    open_price   => 'Eroeffnungskurs',
+          #                                    slippage     => 'Slippage', 
+          #                                    magic_number => 'MagicNumber', 
+          #                                    comment      => 'Opened by FxAssist:ST:' . $id, 
+          #                                    take_profit  => 'TakeProfit', 
+          #                                    stop_loss    => 'StoppLoss', 
+          #                                    lot          => 'Lots');
+          my $ticket = $self->{MQL4_ZMQ}->cmd('cmd',          'set',
+                                              'type',         'Orderart', 
+                                              'pair',         'Symbol', 
+                                              'magic_number', 'MagicNumber', 
+                                              'comment',      'Opened by FxAssist:ST:' . $id, 
+                                              'lot',          '0.5');
+          if ($ticket > 0) {
+            $self->{Store}->{Signal}->{$id}->{Activ}  = 1;
+            $self->{Store}->{Signal}->{$id}->{Ticket} = $ticket;
+          }
+          $self->{Store}->{Signal}->{$id}->{Activ} = $self->{MQL4_ZMQ}->cmd('cmd',          'set',
+                                                                            'type',         'Orderart', 
+                                                                            'pair',         'Symbol', 
+                                                                            'open_price',   'Eroeffnungskurs',
+                                                                            'slippage',     'Slippage', 
+                                                                            'magic_number', 'MagicNumber', 
+                                                                            'comment',      'Opened by FxAssist:ST:' . $id, 
+                                                                            'take_profit',  'TakeProfit', 
+                                                                            'stop_loss',    'StoppLoss', 
+                                                                            'lot',          'Lots');
         }
         if (!$self->{Store}->{Signal}->{$id}->{Valid} &&  $self->{Store}->{Signal}->{$id}->{Activ}) {
           # Im Erfolgsfall close muß $self->{Store}->{Signal}->{$id}->{Activ} auf 0 gesetzt werden.
           # @@@ Parameter korrekt ermitteln und setzen
-          $self->{Store}->{Signal}->{$id}->{Activ} = !$self->{MQL4_ZMQ}->cmd(cmd          => 'unset',
-                                                                             ticket       => 'Ticket');
+          $self->{Store}->{Signal}->{$id}->{Activ} = !$self->{MQL4_ZMQ}->cmd('cmd',    'unset',
+                                                                             'ticket', 'Ticket');
         }
         if (!$self->{Store}->{Signal}->{$id}->{Valid} && !$self->{Store}->{Signal}->{$id}->{Activ}) {delete($self->{Store}->{Signal}->{$id})}
       }

@@ -130,9 +130,7 @@ sub _init {
   ### here Sub ####
   $self->{SubSock} = $self->{Context}->socket(ZMQ_SUB);
   $self->{SubSock}->connect($self->{Endpoint});
-  $self->{SubSock}->subscribe("status|"   + $self->{Account});
-  $self->{SubSock}->subscribe("info|"     + $self->{Account});
-  $self->{SubSock}->subscribe("response|" + $self->{Account});
+  $self->{SubSock}->subscribe("response|" . $self->{Account});
 }
 
 
@@ -161,10 +159,58 @@ sub DESTROY {
 }
 
 
-sub cmd {
+sub getInfo {
   #################################################################
   #     Kommunikation mit dem MT4
   #     Proc 1
+  #     Eingabe: Argumenthash mit mindestens einem Element 'cmd'
+  #              mit Elementen: typ:  status|info
+  #                             wert: bridge|tick|account|ema|order
+  #              Mögliche Wert: status   -> bridge
+  #                             info     -> tick
+  #                             info     -> account
+  #                             info     -> ema
+  #                             info     -> order
+  #     Ausgabe: Status der Bridge
+  #
+  my $self = shift;
+  my %args = (@_);
+
+  my $merker          = $self->{subroutine};
+  $self->{subroutine} = (caller(0))[3];
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, CmdLine->argument(0));
+  
+  my $rc = 0;
+
+  # Subscriber must do
+  # Initialisation
+  $self->{SubSock}->subscribe($args{typ} . '|' . $self->{Account} . ' ' . $args{typ});
+    
+  # Data Transfer
+  # say $self->{ZMQ}->{SubSock}->recv();
+
+  $rc = $self->{SubSock}->recv();
+    
+  # CleanUp
+  $self->{SubSock}->unsubscribe($args{typ} . '|' . $self->{Account} . ' ' . $args{typ});
+
+  if ($rc) {
+    Trace->Trc('I', 1, 0x02901, $args{typ} . '|' . $self->{Account} . ' ' . $args{typ}, $rc);
+  } else {
+    Trace->Trc('I', 1, 0x0a900, $args{typ} . '|' . $self->{Account} . ' ' . $args{typ});
+  }
+
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine});
+  $self->{subroutine} = $merker;
+
+  return $rc;
+}
+
+
+sub cmd {
+  #################################################################
+  #     Kommunikation mit dem MT4
+  #     Proc 2
   #     Eingabe: Argumenthash mit mindestens einem Element 'cmd'
   #     
   #  Kommando get: 
@@ -233,6 +279,16 @@ sub cmd {
   #                                             "prediction":  "[Prediction]"}
   #
   #    Response: true|false
+  #     
+  #  Kommando parameter:
+  #
+  #  Request Value: cmd|[account name]|[uid] {"cmd":   "parameter",
+  #                                           "value": "[zu setzender Parameter]"}
+  #                 cmd|testaccount|fdjksalr38wufsd= {"cmd":   "set",
+  #                                                   "value": "Wait_for_Message=0"}
+  #                     
+  #  Response: -
+    
   my $self = shift;
   my %args = (@_);
 
@@ -254,30 +310,37 @@ sub cmd {
 
     $self->{PubSock}->send($cmd, ZMQ_DONTWAIT);
     usleep 100_000;
-    my $rc = $self->{ZMQ}->{SubSock}->recv();
+    my $rc = $self->{SubSock}->recv();
     
     # Response:   response|[account name]|[uid] {"response": "[response]"}
     #
     # Responses:  true
     #             false
-    #             Order has been processed.
+    #             Order has been send:[Ticket ID]
+    #             Order has been modified.
+    #             Order has been closed.
     #             [pair]
     #
     if      ($args{cmd} eq 'get') {
       #    Response: [Ergebnis]
       #              EURUSD
     } elsif ($args{cmd} eq 'set') {
-      #    Response: Order has been processed.
-      $rc = ($rc eq 'Order has been processed.');
+      #    Response: Order has been send:[Ticket ID]
+      if ($rc =~ /^Order has been send:(.*)$/) {
+        $rc = $1;
+      }
     } elsif ($args{cmd} eq 'reset') {
-      #    Response: Order has been processed.
-      $rc = ($rc eq 'Order has been processed.');
+      #    Response: Order has been modified.
+      $rc = ($rc eq 'Order has been modified.');
     } elsif ($args{cmd} eq 'unset') {
-      #    Response: Order has been processed.
-      $rc = ($rc eq 'Order has been processed.');
+      #    Response: Order has been closed.
+      $rc = ($rc eq 'Order has been closed.');
     } elsif ($args{cmd} eq 'draw') {
       #    Response: true|false
       $rc = ($rc eq 'true');
+    } elsif ($args{cmd} eq 'parameter') {
+      #    Response: 1
+      $rc = 1;
     } else {
       # unbekanntes Kommando
       $rc = 0;
@@ -301,7 +364,7 @@ sub cmd {
       Trace->Trc('I', 1, 0x0a900, $cmd);
     }
   } else {
-    
+    # @@@ kein Kommando vorhanden
   }
 
   Trace->Trc('S', 2, 0x00002, $self->{subroutine});

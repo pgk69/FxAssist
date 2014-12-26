@@ -58,12 +58,12 @@ use Fcntl;
 #
 
 # Option-Objekt: Liest und speichert die Kommandozeilenparameter
-$VERSION = CmdLine->new('Dummy'  => 'dummy:s')->version($VERSION);
+$VERSION = CmdLine->new()->version($VERSION);
 
 # Trace-Objekt: Liest und speichert die Meldungstexte; gibt Tracemeldungen aus
 $VERSION = Trace->new()->version($VERSION);
 
-# Config-Objekt: Liest und speichert die Initialisierungsdatei
+# Config-Objekt: Liest und speichert den Inhalt der Initialisierungsdatei
 $VERSION = Configuration->new()->version($VERSION);
 
 # Kopie des Fehlerkanals erstellen zur gelegentlichen Abschaltung
@@ -83,17 +83,12 @@ if ($@) {
 }
 $VERSION = $prg->version($VERSION);
 
-my $cron = Configuration->config('Prg', 'Aktiv');
+# Die Abfrage und entsprechende Aktionen werden in einer Endlosschleife ausgeführt.
+# Falls Reentranz ueber das Lockfile unterbunden wird, ist es dennoch sinnvoll 
+# FxAssist in die crontab eintrutragen, falls es mal zu einem Programmabsturz kommt
 while (1) {
-  if (Schedule::Cron->get_next_execution_time($cron) > time) {
-    sleep (Schedule::Cron->get_next_execution_time($cron) - time);
-  }
   $prg->action();
 }
-
-#my $cron = new Schedule::Cron($prg->can('action'), nofork => 1);
-#$cron->add_entry(Configuration->config('Prg', 'Aktiv'));
-#$cron->run();
 
 Trace->Exit(0, 1, 0x00002, Configuration->config('Prg', 'Name'), $VERSION);
 

@@ -130,16 +130,17 @@ sub _init {
  
   Trace->Trc('S', 1, 0x00001, Configuration->prg, $VERSION . " (" . $$ . ")" . " Test: " . Trace->test() . " Parameter: " . CmdLine->new()->{ArgStrgRAW});
   
-  if (Configuration->config('Prg', 'Plugin')) {
-
+  my %cfg = Configuration->config();
+  
+  # Ggf. Plugins laden falls in der Ini etwas angegeben ist
+  if ($cfg{Prg}{Plugin}) {
     # refs ausschalten wg. dyn. Proceduren
     no strict 'refs';
     my %plugin = ();
 
-    # Bearbeiten aller Erweiterungsmodule die in der INI-Date
+    # Bearbeiten aller Erweiterungsmodule die in der INI-Datei
     # in Sektion [Prg] unter "Plugin =" definiert sind
-    foreach (split(/ /, Configuration->config('Prg', 'Plugin'))) {
-
+    foreach (split(/ /, $cfg{Prg}{Plugin})) {
       # Falls ein Modul existiert
       if (-e "$Bin/plugins/${_}.pm") {
 
@@ -174,8 +175,8 @@ sub _init {
   }
   
   # Einmalige oder parallele Ausführung
-  if (Configuration->config('Prg', 'LockFile')) {
-    $self->{LockFile} = File::Spec->canonpath(Utils::extendString(Configuration->config('Prg', 'LockFile'), "BIN|$Bin|SCRIPT|" . uc($Script)));
+  if ($cfg{Prg}{LockFile}) {
+    $self->{LockFile} = File::Spec->canonpath(Utils::extendString($cfg{Prg}{LockFile}, "BIN|$Bin|SCRIPT|" . uc($Script)));
     $self->{Lock} = LockFile::Simple->make(-max => 5, -delay => 1, -format => '%f', -autoclean => 1, -stale => 1, -wfunc => undef);
     my $errtxt;
     $SIG{'__WARN__'} = sub {$errtxt = $_[0]};
@@ -193,25 +194,27 @@ sub _init {
     }
   }
   
-  # MQL4_ZMQ Einbindungung
-  $self->{MQL4_ZMQ} = MQL4_ZMQ->new();
-  # Lesen der aktuellen Orders
-  $self->{MQL4_ZMQ}->cmd('cmd',   'parameter',
-                         'value', 'get_info=1');
-  my $status  = $self->{MQL4_ZMQ}->getInfo('status', 'bridge');
-  my $account = $self->{MQL4_ZMQ}->getInfo('info',   'account');
-  my $orders  = $self->{MQL4_ZMQ}->getInfo('info',   'order');
-  my $ema     = $self->{MQL4_ZMQ}->getInfo('info',   'ema');
-  $self->{MQL4_ZMQ}->cmd('cmd',   'parameter',
-                         'value', 'get_info=0');
-  
-  # @@@ Alle Orders durchgehen und die
-  while ((my $key, my $value) = each(%{$orders})) {
-    if ($key eq 'comment' && $value =~ /Opened by FxAssist:ST:(.*)/) {
-      $self->{Store}->{Signal}->{$1}->{Activ} = 1;
+  # Anlegen der ZMQ Verbindung
+  $self->{ZMQ} = MQL4_ZMQ->new('PubAddr' => $cfg{ZMQ}{PubAddr} || '4711',
+                               'SubAddr' => $cfg{ZMQ}{SubAddr} || '4712');
+
+  # Einlesen aller konfigurierten Kontoverbindungen
+  foreach my $section (keys %cfg) {
+    next unless $section =~ /^Account (.*)$/;
+    my $account = $1;
+    while ((my $key, my $value) = each(%{$cfg{$section}})) {
+      $self->{Account}->{$account}->{$key} = Utils::extendString($value);
     }
-  }                        
-           
+    if (defined($account) && 
+        defined($self->{Account}->{$account}->{Uid}) &&
+        defined($self->{Account}->{$account}->{MagicNumber}) &&
+        defined($self->{Account}->{$account}->{Symbol})) {
+      $self->{Account}->{$account}->{Connected} = $self->connectAccount('Account' => $account,
+                                                                        'Uid'     => $self->{Account}->{$account}->{Uid});
+    } else {
+      delete($self->{Account}->{$account});
+    }
+  }
    
   # Mit dem RobotUA wird das Warten automatisiert; leider kommen wir damit nicht rein
   # $self->{Browser} = LWP::RobotUA->new('Me/1.0', 'a@b.c');
@@ -219,8 +222,9 @@ sub _init {
   $self->{Browser} = LWP::UserAgent->new( );
   $self->{Browser}->env_proxy();   # if we're behind a firewall
   
-  if (Configuration->config('Prg', 'Cookie')) {
-    $self->{Cookie} = Utils::extendString(Configuration->config('Prg', 'Cookie'), "BIN|$Bin|SCRIPT|" . uc($Script));
+  # Falls Cookies defiiniert sind werden die Cookies geladen (entweder Datei oder Memorycookies)
+  if ($cfg{Prg}{Cookie}) {
+    $self->{Cookie} = Utils::extendString($cfg{Prg}{Cookie}, "BIN|$Bin|SCRIPT|" . uc($Script));
     if ($self->{Cookie} eq '1') {
       $self->{Browser}->cookie_jar({});
     } else {
@@ -229,18 +233,21 @@ sub _init {
     }
   }
 
-  if (Configuration->config('Prg', 'Storable')) {
-    $self->{Storable} = Utils::extendString(Configuration->config('Prg', 'Storable'), "BIN|$Bin|SCRIPT|" . uc($Script));
+  # Falls ein Aktivitaetszeitraum konfiguriert ist wird er gesetzt
+  $self->{Cron} = $cfg{Prg}{Aktiv};
+  
+  # Falls Persistenz definiert ist wird die Datenstruktur aus der Persistenzdatei geladen
+  if ($cfg{Prg}{Storable}) {
+    $self->{Storable} = Utils::extendString($cfg{Prg}{Storable}, "BIN|$Bin|SCRIPT|" . uc($Script));
      eval {$self->{Store} = retrieve $self->{Storable}};
   }
   
   # URL-Zugriff, Form- und Datenfelder definieren
   if (!defined($self->{Store}->{Location})) {
-    my %config = Configuration->config();
-    foreach my $section (keys %config) {
+    foreach my $section (keys %cfg) {
       next unless $section =~ /^Location (.*)$/;
       my $location = $1;
-      while ((my $key, my $value) = each(%{$config{$section}})) {
+      while ((my $key, my $value) = each(%{$cfg{$section}})) {
         (my $key1, my $value1) = split(' ', $key);
         if (defined($value1)) {
           $self->{Store}->{Location}->{$location}->{$key1}->{$value1} = Utils::extendString($value);
@@ -252,7 +259,7 @@ sub _init {
     $self->{Store}->{Location}->{Last}       = '';
     $self->{Store}->{Location}->{Next}       = 'Login';
     $self->{Store}->{Location}->{Delay}      = 0;
-    $self->{Store}->{Location}->{Lazyfaktor} = Configuration->config('Prg', 'Storable') || 10;
+    $self->{Store}->{Location}->{Lazyfaktor} = $cfg{Prg}{Lazyfaktor} || 10;
     if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
   }
   
@@ -440,7 +447,7 @@ sub myPost {
 
 sub action {
   #################################################################
-  #     Dauerlaufrouting
+  #     Dauerlaufroutine
   #     Proc 5
   #
   my $self = shift;
@@ -451,9 +458,35 @@ sub action {
   
   my $rc = 0;
   
-  if ($self->{Store}->{Location}->{Next} eq 'Login')  {$self->doLogin()}
-  if ($self->{Store}->{Location}->{Next} eq 'GetIn')  {$self->doGetIn()}
-  if ($self->{Store}->{Location}->{Next} eq 'GetOut') {$self->doGetOut()}
+  # Falls ein Aktivitaetszeitraum gesetzt ist, wird so lange geschlafen, bis die
+  # naechste Aktivitaet ansteht
+  if (defined($self->{Cron}) && Schedule::Cron->get_next_execution_time($self->{Cron}) > time) {
+    sleep (Schedule::Cron->get_next_execution_time($self->{Cron}) - time);
+  }
+  
+  # Falls die Accounts nicht verbunden sind verbinden wir sie erst einmal und ermitteln
+  # die aktuellen Orders
+  foreach my $account (keys(%{$self->{Account}})) {
+    if (!$self->{Account}->{$account}->{Connected}) {
+      $self->{Account}->{$account}->{Connected} = $self->connectAccount('Account' => $account,
+                                                                        'Uid'     => $self->{Account}->{$account}->{Uid});
+    }
+  }
+  
+  if (Configuration->config('Prg', 'Fake')) {
+    $self->{Store}->{Signal}->{Aktuell}          = '1234';
+    $self->{Store}->{Signal}->{'1234'}->{Valid}  = 1;
+    $self->{Store}->{Signal}->{'1234'}->{Activ}  = 0;
+    $self->{Store}->{Signal}->{'1234'}->{Signal} = 'DAX Short';
+    $self->{Store}->{Signal}->{'1234'}->{Stand}  = '9427';
+    $self->{Store}->{Signal}->{'1234'}->{Zeit}   = '20.11.2014 – 09:45 Uhr';
+    $self->{Store}->{Signal}->{'1234'}->{SL}     = '9455';
+    $self->{Store}->{Signal}->{'1234'}->{TP}     = '9399';
+  } else {
+    if ($self->{Store}->{Location}->{Next} eq 'Login')  {$self->doLogin()}
+    if ($self->{Store}->{Location}->{Next} eq 'GetIn')  {$self->doGetIn()}
+    if ($self->{Store}->{Location}->{Next} eq 'GetOut') {$self->doGetOut()}
+  }
   
   # Ein Signal hat 2 Flags. In Abhaengigkeit von diesen sind  
   # unterschiedliche Instruktionen zu geben
@@ -466,48 +499,48 @@ sub action {
     foreach my $id (keys(%{$self->{Store}->{Signal}})) {
       if (defined($self->{Store}->{Signal}->{$id}) && (ref($self->{Store}->{Signal}->{$id}) eq 'HASH')) {
         $self->doDebugSignal($id) if Trace->debugLevel() > 3;
-        if ( $self->{Store}->{Signal}->{$id}->{Valid} &&  $self->{Store}->{Signal}->{$id}->{Activ}) {next};
-        if ( $self->{Store}->{Signal}->{$id}->{Valid} && !$self->{Store}->{Signal}->{$id}->{Activ}) {
-          # Im Erfolgsfall open muß $self->{Store}->{Signal}->{$id}->{Activ} auf 1 gesetzt werden.
-          # @@@ Parameter korrekt ermitteln und setzen
-          #my $ticket = $self->{MQL4_ZMQ}->cmd(cmd          => 'set',
-          #                                    type         => 'Orderart', 
-          #                                    pair         => 'Symbol', 
-          #                                    open_price   => 'Eroeffnungskurs',
-          #                                    slippage     => 'Slippage', 
-          #                                    magic_number => 'MagicNumber', 
-          #                                    comment      => 'Opened by FxAssist:ST:' . $id, 
-          #                                    take_profit  => 'TakeProfit', 
-          #                                    stop_loss    => 'StoppLoss', 
-          #                                    lot          => 'Lots');
-          my $ticket = $self->{MQL4_ZMQ}->cmd('cmd',          'set',
-                                              'type',         'Orderart', 
-                                              'pair',         'Symbol', 
-                                              'magic_number', 'MagicNumber', 
-                                              'comment',      'Opened by FxAssist:ST:' . $id, 
-                                              'lot',          '0.5');
-          if ($ticket > 0) {
-            $self->{Store}->{Signal}->{$id}->{Activ}  = 1;
-            $self->{Store}->{Signal}->{$id}->{Ticket} = $ticket;
+        my $deleteSignal = 1;
+        foreach my $account (keys(%{$self->{Account}})) {
+          if ($self->{Store}->{Signal}->{$id}->{Valid} &&  $self->{Account}->{$account}->{Signal}->{$id}->{Activ}) {
+            #   Valid 1     Activ (Account) 1    keine Aktion
+            $deleteSignal = 0;
+            next;
+          } elsif ($self->{Store}->{Signal}->{$id}->{Valid} && !$self->{Account}->{$account}->{Signal}->{$id}->{Activ}) {
+            #   Valid 1     Activ (Account) 0    Trade plazieren
+            $deleteSignal = 0;
+            my $orderart;
+            if ($self->{Store}->{Signal}->{$id}->{Signal} =~ /Long$/)  {$orderart = 0}
+            if ($self->{Store}->{Signal}->{$id}->{Signal} =~ /Short$/) {$orderart = 1}
+            my $ticket = $self->{ZMQ}->cmd('Account',      $account,
+                                           'Uid',          $self->{Account}->{$account}->{Uid},
+                                           'cmd',          'set',
+                                           'type',         $orderart, 
+                                           'pair',         $self->{Account}->{$account}->{Symbol}, 
+                                           'magic_number', $self->{Account}->{$account}->{MagicNumber}, 
+                                           'comment',      'Opened by FxAssist:ST:' . $id, 
+                                           'lot',          '0.5');
+            if ($ticket > 0) {
+              # Im Erfolgsfall open muß $self->{Store}->{Signal}->{$id}->{Activ} auf 1 gesetzt werden.
+              $self->{Account}->{$account}->{Signal}->{$id}->{Activ}  = 1;
+              $self->{Account}->{$account}->{Signal}->{$id}->{Ticket} = $ticket;
+            }
+          } elsif (!$self->{Store}->{Signal}->{$id}->{Valid} &&  $self->{Account}->{$account}->{Signal}->{$id}->{Activ}) {
+            #   Valid 0     Activ (Account) 1    Trade schliessen
+            $deleteSignal = 0;
+            $self->{Account}->{$account}->{Signal}->{$id}->{Activ} = !$self->{ZMQ}->cmd('Account', $account,
+                                                                                        'Uid',     $self->{Account}->{$account}->{Uid},
+                                                                                        'cmd',     'unset',
+                                                                                        'ticket',  $self->{Account}->{$account}->{Signal}->{$id}->{Ticket});
           }
-          $self->{Store}->{Signal}->{$id}->{Activ} = $self->{MQL4_ZMQ}->cmd('cmd',          'set',
-                                                                            'type',         'Orderart', 
-                                                                            'pair',         'Symbol', 
-                                                                            'open_price',   'Eroeffnungskurs',
-                                                                            'slippage',     'Slippage', 
-                                                                            'magic_number', 'MagicNumber', 
-                                                                            'comment',      'Opened by FxAssist:ST:' . $id, 
-                                                                            'take_profit',  'TakeProfit', 
-                                                                            'stop_loss',    'StoppLoss', 
-                                                                            'lot',          'Lots');
+          if (!$self->{Store}->{Signal}->{$id}->{Valid} && !$self->{Account}->{$account}->{Signal}->{$id}->{Activ}) {
+            #   Valid 0     Activ (Account) 1    Trade schliessen
+            delete($self->{Account}->{$account}->{Signal}->{$id});
+          }
         }
-        if (!$self->{Store}->{Signal}->{$id}->{Valid} &&  $self->{Store}->{Signal}->{$id}->{Activ}) {
-          # Im Erfolgsfall close muß $self->{Store}->{Signal}->{$id}->{Activ} auf 0 gesetzt werden.
-          # @@@ Parameter korrekt ermitteln und setzen
-          $self->{Store}->{Signal}->{$id}->{Activ} = !$self->{MQL4_ZMQ}->cmd('cmd',    'unset',
-                                                                             'ticket', 'Ticket');
+        if ($deleteSignal) {
+          # Falls das Signal bei keinem Account mehr aktiv ist, kann es geloescht werden
+          delete($self->{Store}->{Signal}->{$id})
         }
-        if (!$self->{Store}->{Signal}->{$id}->{Valid} && !$self->{Store}->{Signal}->{$id}->{Activ}) {delete($self->{Store}->{Signal}->{$id})}
       }
     }
   }
@@ -704,6 +737,68 @@ sub doGetOut {
 
   return $rc;
 }
+
+
+sub connectAccount {
+  #################################################################
+  #     Verbindung mit dem Account erstellen bzw. wiederherstellen
+  #     via MQL4_ZMQ, Ermitteln des Status und der aktuellen Orders
+  #     Proc 9
+  #     Eingabe: Account -> Accountnummer
+  #     Ausgabe: O: Account nicht verbunden
+  #              1: Account verbunden
+  my $self = shift;
+  my %args = (@_);
+
+  my $merker          = $self->{subroutine};
+  $self->{subroutine} = (caller(0))[3];
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, CmdLine->argument(0));
+  
+  my $rc = $self->{ZMQ}->cmd('Account', $args{Account},
+                             'Uid',     $args{Uid},
+                             'cmd',     'parameter',
+                             'name',    'get_info',
+                             'value',   '1');
+  
+   if ($rc) {
+    my $statusinfo  = $self->{ZMQ}->getInfo('Account', $args{Account},
+                                            'typ',    'status',
+                                            'wert',   'bridge');
+    if ($statusinfo) {$rc = 1}
+    my $accountinfo = $self->{ZMQ}->getInfo('Account', $args{Account},
+                                            'typ',     'info',   
+                                            'wert',    'account');
+    # Lesen der aktuellen Orders
+    my $ordersinfo  = $self->{ZMQ}->getInfo('Account', $args{Account},
+                                            'typ',     'info',   
+                                            'wert',    'order');
+    my $emainfo     = $self->{ZMQ}->getInfo('Account', $args{Account},
+                                            'typ',     'info',   
+                                            'wert',    'ema');
+
+    $self->{ZMQ}->cmd('Account', $args{Account},
+                      'Uid',     $args{Uid},
+                      'cmd',     'parameter',
+                      'name',    'get_info',
+                      'value',   '0');
+
+    # ToDo Alle Orders durchgehen und die ermitteln, fuer die wir zustaendig sind
+    if ($ordersinfo) {
+      while ((my $key, my $value) = each(%{$ordersinfo})) {
+        if ($key eq 'comment' && $value =~ /Opened by FxAssist:ST:(.*)/) {
+          $self->{Account}->{$args{Account}}->{Signal}->{$1}->{Activ} = 1;
+          $self->{Account}->{$args{Account}}->{Signal}->{$1}->{Ticket} = 1;
+        }                        
+      }
+    }
+  }
+  
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine});
+  $self->{subroutine} = $merker;
+
+  return $rc;
+}
+ 
 
 
 

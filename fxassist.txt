@@ -62,6 +62,11 @@
 0x08002 = Erforderliche INI-Variable nicht gesetzt: [%s] %s
 0x08003 = Zu wenig oder fehlerhafte Aufrufparameter <%s>
 
+0x00101 = Instantiiere %s %s
+0x00102 = Instantiiere beendet %s %s
+
+0x08fff = %s
+
 ##########################################################################################
 # Modul CmdLine
 #            Meldungen: 0x00200-0x002ff
@@ -184,5 +189,27 @@
 0x02901 = %s Position fuer Signal <%s> erfolgreich.
 
 0x0a900 = %s Position fuer Signal <%s> nicht erfolgreich.
+
+##########################################################################################
+# Procedure MQL4_ZMQ::cmd
+# Proc Nr. 1 Meldungen: 0x03100-0x031ff
+#            Fehler:    0x0b100-0x0b1ff
+0x03100 = Sende Kommando: <%s> <%s>
+0x03101 = Kommando <%s> erfolgreich versendet.
+0x03102 = Antwort auf Kommando <%s> empfangen: <%s>.
+
+0x0b100 = Keine Kommando definifert <%s>
+0x0b101 = Kommando <%s> nicht erfolgreich versendet <%s>.
+0x0b102 = Keine Antwort auf Kommando <%s> empfangen <%s>.
+0x0b103 = Kiene gueltige Antwort auf Kommando <%s> empfangen.
+0x0b104 = Kiene gueltige Antwort auf Kommando <%s> empfangen.
+
+##########################################################################################
+# Procedure MQL4_ZMQ::getInfo
+# Proc Nr. 2 Meldungen: 0x03200-0x032ff
+#            Fehler:    0x0b200-0x0b2ff
+0x03200 = Abfrage Infos erfolgreich: <%s> <%s>
+
+0x0b200 = Abfrage Infos nicht erfolgreich: <%s> <%s>
 
 [english]

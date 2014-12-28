@@ -16,12 +16,13 @@ say "Context defined.";
 my $s = $ctx->socket(ZMQ_SUB);
 say "Socket defined.";
 
-$s->connect($endpoint);
-say "Connected to Socket.";
+my $rc = 0;
+eval {$s->connect($endpoint)};
+say "Connected to Socket: <$@>";
 
 # all topics
-$s->subscribe('');
-say "Subscribed for everything.";
+$rc = $s->subscribe('');
+say "Subscribed for everything: <$@>";
 while (1) {
   say "Waiting....";
 #  $p->send('ohhai', ZMQ_DONTWAIT);

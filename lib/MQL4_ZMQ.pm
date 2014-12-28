@@ -149,7 +149,6 @@ sub DESTROY {
       $routine .= ( caller($i) )[3] . '(' . ( caller( $i - 1 ) )[2] . '):';
     }
     Trace->Trc('S', 1, 0x08fff, "$routine $@ $! $?");
-    # Trace->Log('Log', 0x10013, $@, $!, $?);
   }
   for my $parent (@ISA) {
     if ( my $coderef = $self->can( $parent . "::DESTROY" ) ) {

@@ -194,6 +194,7 @@ sub _init {
     }
   }
   
+
   # Anlegen der ZMQ Verbindung
   $self->{ZMQ} = MQL4_ZMQ->new('PubAddr' => $cfg{ZMQ}{PubAddr} || '4711',
                                'SubAddr' => $cfg{ZMQ}{SubAddr} || '4712');

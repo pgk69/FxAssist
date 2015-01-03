@@ -304,7 +304,7 @@ sub doDebugResponse {
   
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
-  Trace->Trc('S', 3, 0x00001, $self->{subroutine}, CmdLine->argument(0));
+  Trace->Trc('S', 3, 0x00001, $self->{subroutine}, "$url $param");
 
   my $rc = 0;
 
@@ -324,7 +324,7 @@ sub doDebugResponse {
   Trace->Trc('I', 4, 0x02100, 'Action', defined($action) ? $action : '-');
   Trace->Trc('I', 5, 0x02100, 'Content', defined($self->{Store}->{Response}) ? $self->{Store}->{Response}->decoded_content() : '-');
 
-  Trace->Trc('S', 3, 0x00002, $self->{subroutine});
+  Trace->Trc('S', 3, 0x00002, $self->{subroutine}, $rc);
   $self->{subroutine} = $merker;
 
   return $rc;
@@ -340,7 +340,7 @@ sub doDebugSignal {
 
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
-  Trace->Trc('S', 3, 0x00001, $self->{subroutine}, CmdLine->argument(0));
+  Trace->Trc('S', 3, 0x00001, $self->{subroutine}, $id);
 
   my $rc = 0;
 
@@ -358,7 +358,7 @@ sub doDebugSignal {
     Trace->Trc('I', 1, 0x02200, "  Take-Profit_Marke:", $self->{Store}->{Signal}->{$id}->{TP});
   }
 
-  Trace->Trc('S', 3, 0x00002, $self->{subroutine});
+  Trace->Trc('S', 3, 0x00002, $self->{subroutine}, $rc);
   $self->{subroutine} = $merker;
 
   return $rc;
@@ -376,7 +376,7 @@ sub myGet {
 
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
-  Trace->Trc('S', 3, 0x00001, $self->{subroutine}, CmdLine->argument(0));
+  Trace->Trc('S', 3, 0x00001, $self->{subroutine}, $type);
 
   my $url = $type;
   if (defined($self->{Store}->{Location}->{$type})) {
@@ -404,7 +404,7 @@ sub myGet {
   $self->doDebugResponse($url, @_) if Trace->debugLevel() > 3;
   if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
   
-  Trace->Trc( 'S', 3, 0x00002, $self->{subroutine} );
+  Trace->Trc('S', 3, 0x00002, $self->{subroutine});
   $self->{subroutine} = $merker;
 
   #return ($resp->content, $resp->status_line, $resp->is_success, $resp) if wantarray;
@@ -425,7 +425,7 @@ sub myPost {
 
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
-  Trace->Trc('S', 3, 0x00001, $self->{subroutine}, CmdLine->argument(0));
+  Trace->Trc('S', 3, 0x00001, $self->{subroutine});
 
   my $resp = $self->{Browser}->post(@_);
   $self->{Store}->{Response} = $resp;
@@ -436,7 +436,7 @@ sub myPost {
   $self->doDebugResponse(@_) if Trace->debugLevel() > 3;
   if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
 
-  Trace->Trc( 'S', 3, 0x00002, $self->{subroutine} );
+  Trace->Trc('S', 3, 0x00002, $self->{subroutine});
   $self->{subroutine} = $merker;
 
   #return ($resp->content, $resp->status_line, $resp->is_success, $resp) if wantarray;
@@ -454,7 +454,7 @@ sub action {
 
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
-  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, CmdLine->argument(0));
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine});
   
   my $rc = 0;
   
@@ -545,7 +545,7 @@ sub action {
     }
   }
   
-  Trace->Trc('S', 2, 0x00002, $self->{subroutine});
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
   $self->{subroutine} = $merker;
 
   return $rc;
@@ -560,7 +560,7 @@ sub doLogin {
 
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
-  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, CmdLine->argument(0));
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine});
 
   my $rc = 0;
 
@@ -599,7 +599,7 @@ sub doLogin {
     }
   }
 
-  Trace->Trc('S', 2, 0x00002, $self->{subroutine});
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
   $self->{subroutine} = $merker;
 
   return $rc;
@@ -614,7 +614,7 @@ sub doGetIn {
 
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
-  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, CmdLine->argument(0));
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine});
   
   my $rc = 0;
 
@@ -679,7 +679,7 @@ sub doGetIn {
     if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
   }
 
-  Trace->Trc('S', 2, 0x00002, $self->{subroutine});
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
   $self->{subroutine} = $merker;
 
   return $rc;
@@ -699,7 +699,7 @@ sub doGetOut {
 
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
-  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, CmdLine->argument(0));
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine});
   
   my $rc = 0;
 
@@ -732,7 +732,7 @@ sub doGetOut {
   $self->{Store}->{Location}->{Next} = 'GetIn';
   if ($self->{Storable}) {eval {store \$self->{Store}, $self->{Storable}}}
 
-  Trace->Trc('S', 2, 0x00002, $self->{subroutine});
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
   $self->{subroutine} = $merker;
 
   return $rc;
@@ -752,15 +752,30 @@ sub connectAccount {
 
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
-  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, CmdLine->argument(0));
-  
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, join(' ', %args));
+
+  # Info Responses subscriben  
+  $self->{ZMQ}->subscribeAccount('Account', $args{Account},
+                                 'typ',    'status',
+                                 'wert',   'bridge');
+  $self->{ZMQ}->subscribeAccount('Account', $args{Account},
+                                 'typ',    'info',
+                                 'wert',   'account');
+  $self->{ZMQ}->subscribeAccount('Account', $args{Account},
+                                 'typ',    'info',
+                                 'wert',   'order');
+  $self->{ZMQ}->subscribeAccount('Account', $args{Account},
+                                 'typ',    'info',
+                                 'wert',   'ema');
+  # Info Response einschalten
   my $rc = $self->{ZMQ}->cmd('Account', $args{Account},
                              'Uid',     $args{Uid},
                              'cmd',     'parameter',
                              'name',    'get_info',
                              'value',   '1');
   
-   if ($rc) {
+  if ($rc) {
+    # Infos anfordern
     my $statusinfo  = $self->{ZMQ}->getInfo('Account', $args{Account},
                                             'typ',    'status',
                                             'wert',   'bridge');
@@ -776,6 +791,7 @@ sub connectAccount {
                                             'typ',     'info',   
                                             'wert',    'ema');
 
+    # Info Response ausschalten
     $self->{ZMQ}->cmd('Account', $args{Account},
                       'Uid',     $args{Uid},
                       'cmd',     'parameter',
@@ -791,9 +807,26 @@ sub connectAccount {
         }                        
       }
     }
+    
+    # Info Responses unsubscriben  
+    $self->{ZMQ}->unsubscribeAccount('Account', $args{Account},
+                                   'typ',    'status',
+                                   'wert',   'bridge');
+    $self->{ZMQ}->unsubscribeAccount('Account', $args{Account},
+                                   'typ',    'info',
+                                   'wert',   'account');
+    $self->{ZMQ}->unsubscribeAccount('Account', $args{Account},
+                                   'typ',    'info',
+                                   'wert',   'order');
+    $self->{ZMQ}->unsubscribeAccount('Account', $args{Account},
+                                   'typ',    'info',
+                                   'wert',   'ema');
+    # Repondes subcriben
+    $rc = $self->{ZMQ}->subscribeAccount('typ',    'response',
+                                        'Account', $args{Account});
   }
   
-  Trace->Trc('S', 2, 0x00002, $self->{subroutine});
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
   $self->{subroutine} = $merker;
 
   return $rc;

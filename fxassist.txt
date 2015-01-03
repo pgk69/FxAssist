@@ -194,15 +194,15 @@
 # Procedure MQL4_ZMQ::cmd
 # Proc Nr. 1 Meldungen: 0x03100-0x031ff
 #            Fehler:    0x0b100-0x0b1ff
-0x03100 = Sende Kommando: <%s> <%s>
+0x03100 = Kommando: <%s> <%s>
 0x03101 = Kommando <%s> erfolgreich versendet.
 0x03102 = Antwort auf Kommando <%s> empfangen: <%s>.
 
 0x0b100 = Keine Kommando definifert <%s>
 0x0b101 = Kommando <%s> nicht erfolgreich versendet <%s>.
 0x0b102 = Keine Antwort auf Kommando <%s> empfangen <%s>.
-0x0b103 = Kiene gueltige Antwort auf Kommando <%s> empfangen.
-0x0b104 = Kiene gueltige Antwort auf Kommando <%s> empfangen.
+0x0b103 = Keine gueltige Antwort auf Kommando <%s> empfangen.
+0x0b104 = Keine gueltige Antwort auf Kommando <%s> empfangen.
 
 ##########################################################################################
 # Procedure MQL4_ZMQ::getInfo
@@ -211,5 +211,53 @@
 0x03200 = Abfrage Infos erfolgreich: <%s> <%s>
 
 0x0b200 = Abfrage Infos nicht erfolgreich: <%s> <%s>
+
+##########################################################################################
+# Procedure MQL4_ZMQ::subscribeAccount
+# Proc Nr. 3 Meldungen: 0x03300-0x033ff
+#            Fehler:    0x0b300-0x0b3ff
+0x03300 = Socket erfolgreich subscribed: <%s> <%s>
+
+0x0b300 = Socket nicht subscribed: <%s> <%s>
+
+##########################################################################################
+# Procedure MQL4_ZMQ::unsubscribeAccount
+# Proc Nr. 4 Meldungen: 0x03400-0x034ff
+#            Fehler:    0x0b400-0x0b4ff
+0x03400 = Socket erfolgreich unsubscribed: <%s> <%s>
+
+0x0b400 = Socket nicht unsubscribed: <%s> <%s>
+
+##########################################################################################
+# Procedure MQL4_ZMQ::_connectSocket
+# Proc Nr. 5 Meldungen: 0x03500-0x035ff
+#            Fehler:    0x0b500-0x0b5ff
+0x03500 = Socket erfolgreich connected: <%s> <%s>
+
+0x0b500 = Socket nicht connected: <%s> <%s>
+
+##########################################################################################
+# Procedure MQL4_ZMQ::_recv
+# Proc Nr. 6 Meldungen: 0x03600-0x036ff
+#            Fehler:    0x0b600-0x0b6ff
+0x03600 = Response erfolgreich empfangen: <%s> <%s>
+
+0x0b600 = Response nicht empfangen: <%s> <%s>
+
+##########################################################################################
+# Procedure MQL4_ZMQ::_bindSocket
+# Proc Nr. 7 Meldungen: 0x03700-0x037ff
+#            Fehler:    0x0b700-0x0b7ff
+0x03700 = Socket erfolgreich binded: <%s> <%s>
+
+0x0b700 = Socket nicht binded: <%s> <%s>
+
+##########################################################################################
+# Procedure MQL4_ZMQ::_send
+# Proc Nr. 8 Meldungen: 0x03800-0x038ff
+#            Fehler:    0x0b800-0x0b8ff
+0x03800 = Kommando erfolgreich gesendet: <%s> <%s>
+
+0x0b800 = Kommando nicht gesendet: <%s> <%s>
 
 [english]

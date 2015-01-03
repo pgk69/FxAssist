@@ -11,11 +11,9 @@ Intern:
 
 Kommunikation MT4:
 
-* ZeroMQ Telegramme definieren und auf beiden Seiten (Perl und MT4) implementieren
+√ ZeroMQ Telegramme definieren und auf beiden Seiten (Perl und MT4) implementieren
 
-* Ergebnis des ZMQ Transfers ermitteln (kein Returncode verfuegbar) 
+√ Ergebnis des ZMQ Transfers ermitteln (kein Returncode verfuegbar) 
 
-* Rueckmeldung des MT4: Position offen/geschlossen holen und auswerten
-
-* Ergebnis des ZMQ Transfers ermitteln (kein Returncode verfuegbar) 
+√ Rueckmeldung des MT4: Position offen/geschlossen holen und auswerten
 

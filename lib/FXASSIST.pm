@@ -207,11 +207,9 @@ sub _init {
       $self->{Account}->{$account}->{$key} = Utils::extendString($value);
     }
     if (defined($account) && 
-        defined($self->{Account}->{$account}->{Uid}) &&
         defined($self->{Account}->{$account}->{MagicNumber}) &&
         defined($self->{Account}->{$account}->{Symbol})) {
-      $self->{Account}->{$account}->{Connected} = $self->connectAccount('Account' => $account,
-                                                                        'Uid'     => $self->{Account}->{$account}->{Uid});
+      $self->{Account}->{$account}->{Connected} = $self->connectAccount('account' => $account);
     } else {
       delete($self->{Account}->{$account});
     }
@@ -445,7 +443,147 @@ sub myPost {
 }
 
 
-sub action {
+sub EA_Kommunikation {
+  #################################################################
+  #     Procedure zur Uebergabe von Kommandos und Abholen des 
+  #     Status von den angemeldeten EAs
+  #     Proc 5
+  #
+  my $self = shift;
+
+  my $merker          = $self->{subroutine};
+  $self->{subroutine} = (caller(0))[3];
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine});
+  
+  my $rc = 0;
+  
+  sub readResponse {
+    #################################################################
+    #     Procedure zum Einlesen der EA Response
+    sleep(shift);
+    while (my %response = ($self->{ZMQ}->getResponse())) {
+      # Antwort: response|[account name] {"response": "[response]"}
+      #    account : [Accountnummer]
+      #    status  : [0|1]
+      #    ticket  : [Ticket ID]
+      #    signal  : [Signal ID]
+      #    msg     : [Meldungstext]
+      if (defined($self->{Account}->{$response{account}})) {
+        if (my $id = $self->{Account}->{$response{account}}->{Signal}->{$response{ticket}}->{Parameter}) {
+          if ($response{status} && $response{ticket} && $id) {
+            if ($response eq 'set')   {$self->{Account}->{$response{account}}->{Signal}->{$id}->{Activ} = 1}
+            if ($response eq 'unset') {$self->{Account}->{$response{account}}->{Signal}->{$id}->{Activ} = 0}
+            $self->{Account}->{$response{account}}->{Signal}->{$id}->{Ticket} = $response{ticket};
+          } 
+          delete ($self->{Account}->{$response{account}}->{Signal}->{$id}->{Parameter});
+          # Todo: Gelegentlich mal $self->{Kommandos} ueberpruefen und aufraeumen
+        } 
+      }
+    }
+  }
+ 
+  # Alle Steps werden fue jeden Account ausgefuehrt. Dazu hat jeder
+  # Step eine eigene Schleife, da die Ergebnisse der vorhergehenden 
+  # Schleife u.U. dazu fuehren, das die nachfolgende Schleife nicht
+  # ueber alle Accounts ausgefuehrt wird
+  
+  # Step 0: Verbinden der Account, falls noch nicht geschehen
+  # Falls die Accounts nicht verbunden sind verbinden wir sie erst einmal und ermitteln
+  # die aktuellen Orders
+  foreach my $account (keys(%{$self->{Account}})) {
+    next if $self->{Account}->{$account}->{Connected};
+    $self->{Account}->{$account}->{Connected} = $self->connectAccount('account' => $account);
+  }
+  
+  # Step 1: Einlesen der Schnittstelle und Auswerten der gelesenen Signale
+  readResponse(0);
+
+  # Step 2: Ausfuehren der EA-IO und ggf. Bereinigen der Datenstruktur
+  # Ein Signal hat 2 Flags. In Abhaengigkeit von diesen sind  
+  # unterschiedliche Instruktionen zu geben
+  # Aktiv  Valid  Instruktion
+  #   1      0    Sende Schliessauftrag fuer diese Postition
+  #   1      1    -
+  #   0      1    Sende Eroeffnungsauftrag fuer diese Position
+  #   0      0    Das Signal ist erledigt und wird aus der Datenstruktur entfernt
+  #               Falls das Signal fuer keinen Account mehr aktiv ist wird es geloescht
+  if (defined($self->{Store}->{Signal})) {
+    my $EA_IO = 0;
+    foreach my $id (keys(%{$self->{Store}->{Signal}})) {
+      if (defined($self->{Store}->{Signal}->{$id}) && (ref($self->{Store}->{Signal}->{$id}) eq 'HASH')) {
+        $self->doDebugSignal($id) if Trace->debugLevel() > 3;
+        my $deleteSignal = 1;
+        foreach my $account (keys(%{$self->{Account}})) {
+          next if !$self->{Account}->{$account}->{Connected};
+          if ($self->{Account}->{$account}->{Signal}->{$id}->{Activ}) {
+            # Signal fuer diesen Account aktiv -> nicht loeschen
+            $deleteSignal = 0;
+            if (!$self->{Store}->{Signal}->{$id}->{Valid}) {
+              # Signal nicht valide -> Trade schliessen
+              $EA_IO = 1;
+              if (defined($self->{Account}->{$account}->{Signal}->{$id}->{Parameter})) {
+                # Signalschliessung wurde bereits versendet, ist aber noch nicht quittiert, daher senden wir nochmal.
+                # Der MT4 muss anhand der Referenz Sorge tragen, dass es nicht zu Doppelausfuehrungen kommt
+                $self->{ZMQ}->cmd($self->{Account}->{$account}->{Signal}->{$id}->{Parameter});
+              } else {
+                # Signalschliessung wurde noch nicht versendet
+                my %parameter = {'account',      $account,
+                                 'cmd',          'unset',
+                                 'ticket',       $self->{Account}->{$account}->{Signal}->{$id}->{Ticket};
+                $parameter{referenz} = $self->{ZMQ}->cmd(%parameter);
+                $self->{Account}->{$account}->{Signal}->{$id}->{Parameter} = %parameter; 
+              }
+            }  
+          } else {
+            # Signal fuer diesen Account nicht aktiv
+            if ($self->{Store}->{Signal}->{$id}->{Valid}) {
+              # Signal valide -> Trade eroeffnen
+              $EA_IO = 1;
+              $deleteSignal = 0;
+              if (defined($self->{Account}->{$account}->{Signal}->{$id}->{Parameter})) {
+                # Signaleroeffnung wurde bereits versendet, ist aber noch nicht quittiert, daher senden wir nochmal.
+                # Der MT4 muss anhand der Referenz Sorge tragen, dass es nicht zu Doppelausfuehrungen kommt
+                $self->{ZMQ}->cmd($self->{Account}->{$account}->{Signal}->{$id}->{Parameter});
+              } else {
+                # Signaleroeffnung wurde noch nicht versendet
+                my $orderart;
+                if ($self->{Store}->{Signal}->{$id}->{Signal} =~ /Long$/)  {$orderart = 0}
+                if ($self->{Store}->{Signal}->{$id}->{Signal} =~ /Short$/) {$orderart = 1}
+                my %parameter = {'account',      $account,
+                                 'cmd',          'set',
+                                 'type',         $orderart, 
+                                 'pair',         $self->{Account}->{$account}->{Symbol}, 
+                                 'magic_number', $self->{Account}->{$account}->{MagicNumber}, 
+                                 'comment',      'Opened by FxAssist:ST:' . $id, 
+                                 'signal',       $id,
+                                 'lot',          '0.5'};
+                $parameter{referenz} = $self->{ZMQ}->cmd(%parameter);
+                $self->{Account}->{$account}->{Signal}->{$id}->{Parameter} = %parameter; 
+              }
+            } else {
+              # Signal nicht valide -> Signal fuer diesen Account loeschen
+              delete($self->{Account}->{$account}->{Signal}->{$id});
+            }  
+          }
+        }
+        delete($self->{Store}->{Signal}->{$id}) if $deleteSignal;
+      }
+    }
+    if ($EA_IO) {
+      # Es hat eine IO zum EA stattgefunden daher warten wir eine Sekunde und 
+      # lesen nochmal den Response
+      readResponse(1);
+    }
+  }
+  
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
+  $self->{subroutine} = $merker;
+
+  return $rc;
+}
+
+
+sub getSignals {
   #################################################################
   #     Dauerlaufroutine
   #     Proc 5
@@ -458,90 +596,24 @@ sub action {
   
   my $rc = 0;
   
-  # Falls ein Aktivitaetszeitraum gesetzt ist, wird so lange geschlafen, bis die
-  # naechste Aktivitaet ansteht
+  # Falls ein Aktivitaetszeitraum gesetzt ist, wird so eine Sekunde geschlafen
   if (defined($self->{Cron}) && Schedule::Cron->get_next_execution_time($self->{Cron}) > time) {
-    sleep (Schedule::Cron->get_next_execution_time($self->{Cron}) - time);
-  }
-  
-  # Falls die Accounts nicht verbunden sind verbinden wir sie erst einmal und ermitteln
-  # die aktuellen Orders
-  foreach my $account (keys(%{$self->{Account}})) {
-    if (!$self->{Account}->{$account}->{Connected}) {
-      $self->{Account}->{$account}->{Connected} = $self->connectAccount('Account' => $account,
-                                                                        'Uid'     => $self->{Account}->{$account}->{Uid});
-    }
-  }
-  
-  if (Configuration->config('Prg', 'Fake')) {
-    $self->{Store}->{Signal}->{Aktuell}          = '1234';
-    $self->{Store}->{Signal}->{'1234'}->{Valid}  = 1;
-    $self->{Store}->{Signal}->{'1234'}->{Activ}  = 0;
-    $self->{Store}->{Signal}->{'1234'}->{Signal} = 'DAX Short';
-    $self->{Store}->{Signal}->{'1234'}->{Stand}  = '9427';
-    $self->{Store}->{Signal}->{'1234'}->{Zeit}   = '20.11.2014 – 09:45 Uhr';
-    $self->{Store}->{Signal}->{'1234'}->{SL}     = '9455';
-    $self->{Store}->{Signal}->{'1234'}->{TP}     = '9399';
+    # sleep (Schedule::Cron->get_next_execution_time($self->{Cron}) - time);
+    sleep 1;
   } else {
-    if ($self->{Store}->{Location}->{Next} eq 'Login')  {$self->doLogin()}
-    if ($self->{Store}->{Location}->{Next} eq 'GetIn')  {$self->doGetIn()}
-    if ($self->{Store}->{Location}->{Next} eq 'GetOut') {$self->doGetOut()}
-  }
-  
-  # Ein Signal hat 2 Flags. In Abhaengigkeit von diesen sind  
-  # unterschiedliche Instruktionen zu geben
-  # Valid  Activ  Instruktion
-  #   1      1    -
-  #   1      0    Sende Eroeffnungsauftrag fuer diese Position
-  #   0      1    Sende Schliessauftrag fuer diese Postition
-  #   0      0    Das Signal ist erledigt und wird aus der Datenstruktur entfernt
-  if (defined($self->{Store}->{Signal})) {
-    foreach my $id (keys(%{$self->{Store}->{Signal}})) {
-      if (defined($self->{Store}->{Signal}->{$id}) && (ref($self->{Store}->{Signal}->{$id}) eq 'HASH')) {
-        $self->doDebugSignal($id) if Trace->debugLevel() > 3;
-        my $deleteSignal = 1;
-        foreach my $account (keys(%{$self->{Account}})) {
-          if ($self->{Store}->{Signal}->{$id}->{Valid} &&  $self->{Account}->{$account}->{Signal}->{$id}->{Activ}) {
-            #   Valid 1     Activ (Account) 1    keine Aktion
-            $deleteSignal = 0;
-            next;
-          } elsif ($self->{Store}->{Signal}->{$id}->{Valid} && !$self->{Account}->{$account}->{Signal}->{$id}->{Activ}) {
-            #   Valid 1     Activ (Account) 0    Trade plazieren
-            $deleteSignal = 0;
-            my $orderart;
-            if ($self->{Store}->{Signal}->{$id}->{Signal} =~ /Long$/)  {$orderart = 0}
-            if ($self->{Store}->{Signal}->{$id}->{Signal} =~ /Short$/) {$orderart = 1}
-            my $ticket = $self->{ZMQ}->cmd('Account',      $account,
-                                           'Uid',          $self->{Account}->{$account}->{Uid},
-                                           'cmd',          'set',
-                                           'type',         $orderart, 
-                                           'pair',         $self->{Account}->{$account}->{Symbol}, 
-                                           'magic_number', $self->{Account}->{$account}->{MagicNumber}, 
-                                           'comment',      'Opened by FxAssist:ST:' . $id, 
-                                           'lot',          '0.5');
-            if ($ticket > 0) {
-              # Im Erfolgsfall open muß $self->{Store}->{Signal}->{$id}->{Activ} auf 1 gesetzt werden.
-              $self->{Account}->{$account}->{Signal}->{$id}->{Activ}  = 1;
-              $self->{Account}->{$account}->{Signal}->{$id}->{Ticket} = $ticket;
-            }
-          } elsif (!$self->{Store}->{Signal}->{$id}->{Valid} &&  $self->{Account}->{$account}->{Signal}->{$id}->{Activ}) {
-            #   Valid 0     Activ (Account) 1    Trade schliessen
-            $deleteSignal = 0;
-            $self->{Account}->{$account}->{Signal}->{$id}->{Activ} = !$self->{ZMQ}->cmd('Account', $account,
-                                                                                        'Uid',     $self->{Account}->{$account}->{Uid},
-                                                                                        'cmd',     'unset',
-                                                                                        'ticket',  $self->{Account}->{$account}->{Signal}->{$id}->{Ticket});
-          }
-          if (!$self->{Store}->{Signal}->{$id}->{Valid} && !$self->{Account}->{$account}->{Signal}->{$id}->{Activ}) {
-            #   Valid 0     Activ (Account) 1    Trade schliessen
-            delete($self->{Account}->{$account}->{Signal}->{$id});
-          }
-        }
-        if ($deleteSignal) {
-          # Falls das Signal bei keinem Account mehr aktiv ist, kann es geloescht werden
-          delete($self->{Store}->{Signal}->{$id})
-        }
-      }
+    if (Configuration->config('Prg', 'Fake')) {
+      $self->{Store}->{Signal}->{Aktuell}          = '1234';
+      $self->{Store}->{Signal}->{'1234'}->{Valid}  = 1;
+      $self->{Store}->{Signal}->{'1234'}->{Activ}  = 0;
+      $self->{Store}->{Signal}->{'1234'}->{Signal} = 'DAX Short';
+      $self->{Store}->{Signal}->{'1234'}->{Stand}  = '9427';
+      $self->{Store}->{Signal}->{'1234'}->{Zeit}   = '20.11.2014 – 09:45 Uhr';
+      $self->{Store}->{Signal}->{'1234'}->{SL}     = '9455';
+      $self->{Store}->{Signal}->{'1234'}->{TP}     = '9399';
+    } else {
+      if ($self->{Store}->{Location}->{Next} eq 'Login')  {$self->doLogin()}
+      if ($self->{Store}->{Location}->{Next} eq 'GetIn')  {$self->doGetIn()}
+      if ($self->{Store}->{Location}->{Next} eq 'GetOut') {$self->doGetOut()}
     }
   }
   
@@ -755,45 +827,43 @@ sub connectAccount {
   Trace->Trc('S', 2, 0x00001, $self->{subroutine}, join(' ', %args));
 
   # Info Responses subscriben  
-  $self->{ZMQ}->subscribeAccount('Account', $args{Account},
+  $self->{ZMQ}->subscribeAccount('account', $args{account},
                                  'typ',    'status',
                                  'wert',   'bridge');
-  $self->{ZMQ}->subscribeAccount('Account', $args{Account},
+  $self->{ZMQ}->subscribeAccount('account', $args{account},
                                  'typ',    'info',
                                  'wert',   'account');
-  $self->{ZMQ}->subscribeAccount('Account', $args{Account},
+  $self->{ZMQ}->subscribeAccount('account', $args{account},
                                  'typ',    'info',
                                  'wert',   'order');
-  $self->{ZMQ}->subscribeAccount('Account', $args{Account},
+  $self->{ZMQ}->subscribeAccount('account', $args{account},
                                  'typ',    'info',
                                  'wert',   'ema');
   # Info Response einschalten
-  my $rc = $self->{ZMQ}->cmd('Account', $args{Account},
-                             'Uid',     $args{Uid},
+  my $rc = $self->{ZMQ}->cmd('account', $args{account},
                              'cmd',     'parameter',
                              'name',    'get_info',
                              'value',   '1');
   
   if ($rc) {
     # Infos anfordern
-    my $statusinfo  = $self->{ZMQ}->getInfo('Account', $args{Account},
+    my $statusinfo  = $self->{ZMQ}->getInfo('account', $args{account},
                                             'typ',    'status',
                                             'wert',   'bridge');
     if ($statusinfo) {$rc = 1}
-    my $accountinfo = $self->{ZMQ}->getInfo('Account', $args{Account},
+    my $accountinfo = $self->{ZMQ}->getInfo('account', $args{account},
                                             'typ',     'info',   
                                             'wert',    'account');
     # Lesen der aktuellen Orders
-    my $ordersinfo  = $self->{ZMQ}->getInfo('Account', $args{Account},
+    my $ordersinfo  = $self->{ZMQ}->getInfo('account', $args{account},
                                             'typ',     'info',   
                                             'wert',    'order');
-    my $emainfo     = $self->{ZMQ}->getInfo('Account', $args{Account},
+    my $emainfo     = $self->{ZMQ}->getInfo('account', $args{account},
                                             'typ',     'info',   
                                             'wert',    'ema');
 
     # Info Response ausschalten
-    $self->{ZMQ}->cmd('Account', $args{Account},
-                      'Uid',     $args{Uid},
+    $self->{ZMQ}->cmd('account', $args{account},
                       'cmd',     'parameter',
                       'name',    'get_info',
                       'value',   '0');
@@ -802,28 +872,28 @@ sub connectAccount {
     if ($ordersinfo) {
       while ((my $key, my $value) = each(%{$ordersinfo})) {
         if ($key eq 'comment' && $value =~ /Opened by FxAssist:ST:(.*)/) {
-          $self->{Account}->{$args{Account}}->{Signal}->{$1}->{Activ} = 1;
-          $self->{Account}->{$args{Account}}->{Signal}->{$1}->{Ticket} = 1;
+          $self->{Account}->{$args{account}}->{Signal}->{$1}->{Activ} = 1;
+          $self->{Account}->{$args{account}}->{Signal}->{$1}->{Ticket} = 1;
         }                        
       }
     }
     
     # Info Responses unsubscriben  
-    $self->{ZMQ}->unsubscribeAccount('Account', $args{Account},
-                                   'typ',    'status',
-                                   'wert',   'bridge');
-    $self->{ZMQ}->unsubscribeAccount('Account', $args{Account},
-                                   'typ',    'info',
-                                   'wert',   'account');
-    $self->{ZMQ}->unsubscribeAccount('Account', $args{Account},
-                                   'typ',    'info',
-                                   'wert',   'order');
-    $self->{ZMQ}->unsubscribeAccount('Account', $args{Account},
-                                   'typ',    'info',
-                                   'wert',   'ema');
-    # Repondes subcriben
+    $self->{ZMQ}->unsubscribeAccount('account', $args{account},
+                                     'typ',    'status',
+                                     'wert',   'bridge');
+    $self->{ZMQ}->unsubscribeAccount('account', $args{account},
+                                     'typ',    'info',
+                                     'wert',   'account');
+    $self->{ZMQ}->unsubscribeAccount('account', $args{account},
+                                     'typ',    'info',
+                                     'wert',   'order');
+    $self->{ZMQ}->unsubscribeAccount('account', $args{account},
+                                     'typ',    'info',
+                                     'wert',   'ema');
+    # Repondes subscriben
     $rc = $self->{ZMQ}->subscribeAccount('typ',    'response',
-                                        'Account', $args{Account});
+                                         'account', $args{account});
   }
   
   Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
@@ -832,7 +902,6 @@ sub connectAccount {
   return $rc;
 }
  
-
 
 
 1;

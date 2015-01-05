@@ -48,6 +48,7 @@ use Utils;
 #
 # Module
 #
+use Data::UUID;
 use JSON::PP;
 use ZMQ::FFI;
 use ZMQ::FFI::Constants qw(ZMQ_PUB ZMQ_SUB ZMQ_DONTWAIT ZMQ_SUBSCRIBE ZMQ_NOBLOCK);
@@ -112,8 +113,11 @@ sub _init {
   
   my $rc = 0;
 
-  # MQL4 Initialisierung
+  # Initialisierung JSON Objekt
   $self->{JSON}    = JSON::PP->new->utf8;
+  
+  # Initialisierung UUID Objekt
+  $self->{UUID}    = Data::UUID->new;
   
   # ZeroMQ Initialisierung pub/sub
   #### Context
@@ -162,12 +166,11 @@ sub DESTROY {
 
 sub cmd {
   #################################################################
-  #     Kommunikation mit dem MT4
+  #     Kommandoversand an den MT4
   #     Proc 1
   #     Eingabe: Argumenthash mit mindestens den Elementen 
   #              cmd     : Auszuführendes Kommando
   #              account : Betroffenes Konto
-  #              uid     : Betroffene UID
   #
   #              Weitere moegliche Elemente:
   #              type        : Orderart
@@ -186,46 +189,76 @@ sub cmd {
   #              prediction  : Prediction
   #              name        : Parameter Name
   #              value       : abgefragter/zu setzender Wert
-  #     
-  #  Kommando get_parameter:
-  #  
-  #    Request Value: cmd|[account name]|[uid] {"cmd":  "get_parameter",
-  #                                             "name": "[abgefragter Wert]"}
-  #                   cmd|testaccount|fdjksalr38wufsd= {"cmd":  "set_parameter",
-  #                                                     "name": "pair"}
-  #                       
-  #    Response: [Parameterwert]
-  #              EURUSD
-  #  
-  #  
-  #  Kommando set_parameter:
-  # 
-  #    Request Value: cmd|[account name]|[uid] {"cmd":   "set_parameter",
-  #                                             "name":  "[zu setzender Parameter]",
-  #                                             "value": "[zu setzender Wert]"}
-  #                   cmd|testaccount|fdjksalr38wufsd= {"cmd":   "set_parameter",
-  #                                                     "name": ‚ "Wait_for_Message",
-  #                                                     "value": "0"}
-  #                       
-  #    Response: 0: Nicht erfolgreich
-  #              1: Erfolgreich
   #
+  #    Ausgabe: Referenz ID des Kommandos (Unique ID)
+  #     
+  #    Kommando get_parameter:
+  #
+  #    Request Value: cmd|[account name] {"cmd":      "get_parameter",
+  #                                       "referenz": "[Referenz ID]",
+  #                                       "name":     "[abgefragter Wert]"}
+  #                   cmd|testaccount {"cmd":      "set_parameter",
+  #                                    "referenz": "4162F712-1DD2-11B2-B17E-C09EFE1DC403",
+  #                                    "name":     "pair"}
+  #                       
+  #    Erwarteter Response: Get Parameter
+  #              account:  [Accountnummer]
+  #              referenz: [Referenz ID]
+  #              status:   0: Nicht erfolgreich
+  #                        1: Erfolgreich
+  #              msg:      "Parameter read [Name]:[Wert]"
+  #              name:     [Name]
+  #              value:    [Wert]
+  #
+  #
+  #  Kommando set_parameter:
+  #
+  #    Request Value: cmd|[account name] {"cmd":      "set_parameter",
+  #                                       "referenz": "[Referenz ID]",
+  #                                       "name":     "[zu setzender Parameter]",
+  #                                       "value":    "[zu setzender Wert]"}
+  #                   cmd|testaccount {"cmd":      "set_parameter",
+  #                                    "referenz": "4162F712-1DD2-11B2-B17E-C09EFE1DC403",
+  #                                    "name":     "Wait_for_Message",
+  #                                    "value":    "0"}
+  #                       
+  #    Erwarteter Response: Set Parameter 
+  #              account:  [Accountnummer]
+  #              referenz: [Referenz ID]
+  #              status:   0: Nicht erfolgreich
+  #                        1: Erfolgreich
+  #              msg:      "Parameter set [Name]:[Value]"
+  #              name:     [Name]
+  #              value:    [Wert]
+  #    
   #
   #  Kommando set:
   #
-  #    New Trade/Order: cmd|[account name]|[uid] {"cmd":          "set",
-  #                                               "type":         "[Orderart]", 
-  #                                               "pair":         "[gehandeltes Symbol]", 
-  #                                               "open_price":   "[Eröffnungskurs]",
-  #                                               "slippage":     "[Slippage]", 
-  #                                               "magic_number": "[Magic Number]", 
-  #                                               "comment":      "[Kommentar]", 
-  #                                               "take_profit":  "[TakeProfit]", 
-  #                                               "stop_loss":    "[StoppLoss]", 
-  #                                               "lot":          "[Anzahl Lots]"}
-  #
-  #    Response: Order has been opened:[Ticket ID]
-  #                
+  #    New Trade/Order: cmd|[account name] {"cmd":          "set",
+  #                                         "referenz":     "[Referenz ID]",
+  #                                         "type":         "[Orderart]", 
+  #                                         "pair":         "[gehandeltes Symbol]", 
+  #                                         "open_price":   "[Eröffnungskurs]",
+  #                                         "slippage":     "[Slippage]", 
+  #                                         "magic_number": "[Magic Number]", 
+  #                                         "comment":      "[Kommentar]", 
+  #                                         "take_profit":  "[TakeProfit]", 
+  #                                         "stop_loss":    "[StoppLoss]", 
+  #                                         "signal":       "[Signal ID]", 
+  #                                         "lot":          "[Anzahl Lots]"}
+  #                     cmd|testaccount {"cmd":          "set",
+  #                                      "referenz":     "4162F712-1DD2-11B2-B17E-C09EFE1DC403",
+  #                                      "type":         "2", 
+  #                                      "pair":         "EURUSD", 
+  #                                      "open_price":   "1.25", 
+  #                                      "slippage":     "0.1", 
+  #                                      "magic_number": "11041963", 
+  #                                      "comment":      "Opened by FxAssist",  
+  #                                      "take_profit":  "1.2503", 
+  #                                      "stop_loss":    "1.2450", 
+  #                                      "signal":       "1225", 
+  #                                      "lot":          "0.5"}
+  #  
   #    Trade Types:
   #       0 = (MQL4) OP_BUY       - buying position,
   #       1 = (MQL4) OP_SELL      - selling position,
@@ -233,41 +266,88 @@ sub cmd {
   #       3 = (MQL4) OP_SELLLIMIT - sell limit pending position,
   #       4 = (MQL4) OP_BUYSTOP   - buy stop pending position,
   #       5 = (MQL4) OP_SELLSTOP  - sell stop pending position.
-  #  
+  #
+  #    Erwarteter Response: Trade set
+  #              account:  [Accountnummer]
+  #              referenz: [Referenz ID]
+  #              status:   0: Nicht erfolgreich
+  #                        1: Erfolgreich
+  #              ticket:   [Ticket ID]
+  #              msg:      "Order has been set: [Ticket ID]"
+  #                
   #  
   #  Kommando reset:
   #   
-  #    Update Trade:  cmd|[account name]|[uid] {"cmd":         "reset",
-  #                                             "ticket":      "[Ticket ID]", 
-  #                                             "take_profit": "[TakeProfit]", 
-  #                                             "stop_loss":   "[StoppLoss]"}
-  #
-  #    Update Order neu:  cmd|[account name]|[uid] {"cmd":         "reset",
-  #                                                 "ticket":      "[Ticket ID]", 
-  #                                                 "take_profit": "[TakeProfit]", 
-  #                                                 "stop_loss":   "[StoppLoss]",
-  #                                                 "open_price":  "[Eröffnungskurs]"}
+  #    Update Trade:  cmd|[account name] {"cmd":         "reset",
+  #                                       "referenz":    "[Referenz ID]",
+  #                                       "ticket":      "[Ticket ID]", 
+  #                                       "take_profit": "[TakeProfit]", 
+  #                                       "stop_loss":   "[StoppLoss]"}
+  #                   cmd|testaccount {"cmd":         "reset",
+  #                                    "referenz":    "4162F712-1DD2-11B2-B17E-C09EFE1DC403",
+  #                                    "ticket":      "43916144", 
+  #                                    "take_profit": "1.2515", 
+  #                                    "stop_loss":   "1.2502"}
   #    
-  #    Response: Order has been modified:[Ticket ID]
+  #    Update Order neu:  cmd|[account name] {"cmd":         "reset",
+  #                                           "ticket":      "[Ticket ID]", 
+  #                                           "take_profit": "[TakeProfit]", 
+  #                                           "stop_loss":   "[StoppLoss]",
+  #                                           "open_price":  "[Eröffnungskurs]"}
+  #                       cmd|testaccount {"cmd":         "reset",
+  #                                        "referenz":    "4162F712-1DD2-11B2-B17E-C09EFE1DC403",
+  #                                        "ticket":      "43916144", 
+  #                                        "take_profit": "1.2515", 
+  #                                        "stop_loss":   "1.2502",
+  #                                        "open_price":  "1.2507"}
+  #    
+  #    Erwarteter Response: Trade reset
+  #              account:  [Accountnummer]
+  #              referenz: [Referenz ID]
+  #              status:   0: Nicht erfolgreich
+  #                        1: Erfolgreich
+  #              ticket:   [Ticket ID]
+  #              msg:      "Order has been modified: [Ticket ID]"
   #
   #
   #  Kommando unset:
   #
-  #    Close Trade/Order: cmd|[account name]|[uid] {"cmd":    "unset",
-  #                                                 "ticket": "[Ticket ID]"}
+  #    Close Trade/Order: cmd|[account name] {"cmd":      "unset",
+  #                                           "referenz": "[Referenz ID]",
+  #                                           "ticket":   "[Ticket ID]"}
+  #                       cmd|testaccount {"cmd":      "unset",
+  #                                        "referenz": "4162F712-1DD2-11B2-B17E-C09EFE1DC403",
+  #                                        "ticket":   "43916144"}
   #
-  #    Response: Order has been closed:[Ticket ID]
+  #    Erwarteter Response: Trade unset
+  #              account:  [Accountnummer]
+  #              referenz: [Referenz ID]
+  #              status:   0: Nicht erfolgreich
+  #                        1: Erfolgreich
+  #              ticket:   [Ticket ID]
+  #              msg:      "Order has been closed: [Ticket ID]"
   #     
   #  Kommando draw:
   #
-  #    Draw Object:   cmd|[account name]|[uid] {"cmd":         "draw",
-  #                                             "obj_type":    "[Objekt Type]", 
-  #                                             "open_price":  "[Eröffnungskurs]", 
-  #                                             "close_price": "[Schlußkurs]",
-  #                                             "close_time":  "[Schlußzeit]",
-  #                                             "prediction":  "[Prediction]"}
+  #    Draw Object:   cmd|[account name] {"cmd":         "draw",
+  #                                       "referenz":    "[Referenz ID]",
+  #                                       "obj_type":    "[Objekt Type]", 
+  #                                       "open_price":  "[Eröffnungskurs]", 
+  #                                       "close_price": "[Schlußkurs]",
+  #                                       "close_time":  "[Schlußzeit]",
+  #                                       "prediction":  "[Prediction]"}
+  #                   cmd|testaccount {"cmd":         "draw",
+  #                                    "referenz":    "4162F712-1DD2-11B2-B17E-C09EFE1DC403",
+  #                                    "object_type": "OBJ_ARROW", 
+  #                                    "open_price":  "1.2054", 
+  #                                    "close_time":  "753324221",
+  #                                    "close_price": "1.2234",
+  #                                    "prediction":  "0.7"}
   #
-  #    Response: true|false
+  #    Erwarteter Response: Draw
+  #              account:  [Accountnummer]
+  #              status:   0: Nicht erfolgreich
+  #                        1: Erfolgreich
     
   my $self = shift;
   my %args = (@_);
@@ -279,9 +359,10 @@ sub cmd {
   my $rc = 0;
 
   if (defined($args{cmd})) {
-    my $cmd = "cmd|$args{Account}|$args{Uid} ";
-    delete($args{Account});
-    delete($args{Uid});
+    my $cmd = "cmd|$args{account} ";
+    delete($args{account});
+    # Erzeugen einer eindeutigen Referenz ID
+    $args{referenz} = $self->{UUID}->create_str() if (!defined($args{referenz}));
     $cmd .= $self->{JSON}->utf8(0)->encode(\%args);
 
     Trace->Trc('I', 1, 0x03100, $cmd, ZMQ_DONTWAIT);
@@ -289,58 +370,8 @@ sub cmd {
 #    eval {$self->{PubSock}->send($cmd, ZMQ_DONTWAIT)};
 #    if (!$@) {
     if ($rc = $self->_send($cmd)) {
-      Trace->Trc('I', 1, 0x03101, $cmd);
-      usleep 100_000;
-      $rc = $self->_recv();
-#      if (!$@) {
-      if ($rc) {
-        # Response:   response|[account name]|[uid] {"response": "[response]"}
-        #
-        # Responses:  0
-        #             1
-        #             true
-        #             false
-        #             Order has been send:[Ticket ID]
-        #             Order has been modified.
-        #             Order has been closed.
-        #             [pair]
-        #
-        if ($rc =~ /^response\|$args{Account}\|$args{Uid} \{\"response\"\:[\s]*\"([^\"]+)\"\}$/) {
-          my $response = $1;
-          if      ($args{cmd} eq 'get_parameter') {
-            $rc = $response;
-          } elsif ($args{cmd} eq 'set_parameter') {
-            $rc = $response;
-          } elsif ($args{cmd} eq 'set') {
-            #    Response: Order has been send:[Ticket ID]
-            if ($response =~ /^Order has been send:(.*)$/) {
-              $rc = $1;
-            }
-          } elsif ($args{cmd} eq 'reset') {
-            #    Response: Order has been modified.
-            $rc = ($response =~ /^Order has been modified:(.*)$/);
-          } elsif ($args{cmd} eq 'unset') {
-            #    Response: Order has been closed.
-            $rc = ($response =~ /^Order has been closed:(.*)$/);
-          } elsif ($args{cmd} eq 'draw') {
-            #    Response: true|false
-            $rc = ($response eq 'true');
-          } else {
-            # unbekanntes Kommando
-            $rc = 0;
-          }
-        }
-
-        if ($rc) {
-          # Operation erfolgreich. Signal ist aktiviert(open) oder deaktiviert(close)
-          #$self->{Store}->{Signal}->{$id}->{Activ} = ($op eq 'open');
-          Trace->Trc('I', 1, 0x03102, $cmd, $rc);
-        } else {
-          Trace->Trc('I', 1, 0x0b103, $cmd);
-        }
-      } else {
-        Trace->Trc('I', 1, 0x0b102, $cmd, $rc);
-      }
+      $rc = $args{referenz};
+      Trace->Trc('I', 1, 0x03101, $cmd, $rc);
     } else {
       Trace->Trc('I', 1, 0x0b101, $cmd, $rc);
     }
@@ -348,6 +379,114 @@ sub cmd {
     Trace->Trc('I', 1, 0x0b100, join(' ', %args));
   }
 
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
+  $self->{subroutine} = $merker;
+
+  return $rc;
+}
+
+
+sub getResponse {
+  #################################################################
+  #     Responseabfrage vom MT4
+  #     Proc 9
+  #     Eingabe: Argumenthash mit den Werten
+  #              account : Betroffenes Konto
+  #
+  #     Ausgabe: Argumenthash mit mindestens den Elementen 
+  #              account : Betroffenes Konto
+  #              status  : Gesamtergebnis: 0: Nicht erfolgreich
+  #                                        1: Erfolgreich
+  #
+  #              Weitere moegliche Elemente:
+  #              referenz : Signal ID
+  #              ticket   : Ticket ID 
+  #              msg      : Nachrichten Freitext
+  #              name     : Parameter Name
+  #              value    : abgefragter/zu setzender Wert
+  #     
+  #  Responses:
+  #    Get Parameter:
+  #                 response|[account name] {"account":  "[Accountnummer]",
+  #                                          "referenz": "[Referenz ID]",
+  #                                          "status":   "[0|1]",
+  #                                          "msg":      "Parameter read [Name]:[Wert]",
+  #                                          "name":     "[abgefragter Parameter]",
+  #                                          "value":    "[abgefragter Wert]"}
+  #  
+  #    Set Parameter:
+  #                 response|[account name] {"account":  "[Accountnummer]",
+  #                                          "referenz": "[Referenz ID]",
+  #                                          "status":   "[0|1]",
+  #                                          "msg":      "Parameter read [Name]:[Wert]",
+  #                                          "name":     "[zu setzender Parameter]",
+  #                                          "value":    "[zu setzender Wert]"}
+  #  
+  #    Trade set:   response|[account name] {"account":  "[Accountnummer]"
+  #                                          "referenz": "[Referenz ID]",
+  #                                          "status":   "[0|1]",
+  #                                          "ticket":   "[Ticket ID]",
+  #                                          "msg":      "Order has been set: [Ticket ID]"}
+  #  
+  #    Trade reset: response|[account name] {"account":  "[Accountnummer]",
+  #                                          "referenz": "[Referenz ID]",
+  #                                          "status":   "[0|1]",
+  #                                          "ticket":   "[Ticket ID]",
+  #                                          "msg":      "Order has been modified: [Ticket ID]"}
+  #  
+  #    Trade unset: response|[account name] {"account":  "[Accountnummer]",
+  #                                          "referenz": "[Referenz ID]",
+  #                                          "status":   "[0|1]",
+  #                                          "ticket":   "[Ticket ID]",
+  #                                          "msg":      "Order has been closed: [Ticket ID]"}
+  #  
+  #    Draw:        response|[account name] {"account":  "[Accountnummer]",
+  #                                          "status":   "[0|1]"}
+    
+  my $self = shift;
+  my %args = (@_);
+
+  my $merker          = $self->{subroutine};
+  $self->{subroutine} = (caller(0))[3];
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, join(' ', %args));
+  
+  my $rc = 0;
+
+  # Lese die gesamte Message aus der Queue
+  my $message = $self->_recv();
+  if ($message) {
+    Trace->Trc('I', 2, 0x03900, $message);
+    if ($message =~ /^response\|$args{account} \{(.*)\}$/) {
+      $message = $1;
+      Trace->Trc('I', 2, 0x03901, $message);
+      $rc->{account} = $args{account};
+      my $start_position = 0;
+      my $end_position = length($message);
+      while (($start_position >= 0) && ($end_position > $start_position)) {
+        $start_position = index('"', $message, 0) + 1;
+        $end_position   = index('"', $message, $start_position + 1);
+        if (($start_position >= 0) && ($end_position > $start_position)) {
+          my $key = lc(substr($message, $start_position, $end_position - $start_position));
+          $start_position = index('"', $message, $end_position) + 1;
+          $end_position   = index('"', $message, $start_position + 1);
+          if (($start_position >= 0) && ($end_position > $start_position)) {
+            my $value = substr($message, $start_position, $end_position - $start_position);
+            $message = substr($message, $end_position);
+            $rc->{$key} = $value;
+          }
+        }
+      }
+      if ($rc) {
+        # Komponenten erfolgreich aus Message extrahiert
+        Trace->Trc('I', 1, 0x03902, join(' ', %{$rc}));
+      }
+    } else {
+      Trace->Trc('I', 1, 0x0b901, $message);
+    }
+  } else {
+    Trace->Trc('I', 2, 0x0b900);
+  }
+  
   Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
   $self->{subroutine} = $merker;
 
@@ -382,9 +521,9 @@ sub getInfo {
   $rc = $self->_recv();
 #  if (!$@) {
   if (!$rc) {
-    Trace->Trc('I', 1, 0x03200, $args{typ} . '|' . $args{Account} . ' ' . $args{wert}, $rc);
+    Trace->Trc('I', 1, 0x03200, $args{typ} . '|' . $args{account} . ' ' . $args{wert}, $rc);
   } else {
-    Trace->Trc('I', 1, 0x0b200, $args{typ} . '|' . $args{Account} . ' ' . $args{wert});
+    Trace->Trc('I', 1, 0x0b200, $args{typ} . '|' . $args{account} . ' ' . $args{wert});
   }  
 
   Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
@@ -413,7 +552,7 @@ sub subscribeAccount {
   
   my $rc = 0;
 
-  my $subscribestring = $args{typ} . '|' . $args{Account};
+  my $subscribestring = $args{typ} . '|' . $args{account};
   if (defined($args{wert})) {
     $subscribestring .= ' ' . $args{wert};
   }
@@ -454,15 +593,15 @@ sub unsubscribeAccount {
   
   my $rc = 0;
 
-  eval {$self->{SubSock}->unsubscribe($args{typ} . '|' . $args{Account} . ' ' . $args{wert})};
+  eval {$self->{SubSock}->unsubscribe($args{typ} . '|' . $args{account} . ' ' . $args{wert})};
   if (!$@) {
     $rc = 1;
     $self->{Status}->{SubSock} = 1;
-    Trace->Trc('I', 1, 0x03400, $self->{PubAddr} . ' ' . $args{typ} . '|' . $args{Account} . ' ' . $args{wert}, join(' ', $@));
+    Trace->Trc('I', 1, 0x03400, $self->{PubAddr} . ' ' . $args{typ} . '|' . $args{account} . ' ' . $args{wert}, join(' ', $@));
   } else {
     $rc = 0;
     $self->{Status}->{SubSock} = 0;
-    Trace->Trc('I', 1, 0x0b400, $self->{PubAddr} . ' ' . $args{typ} . '|' . $args{Account} . ' ' . $args{wert}, join(' ', $@));
+    Trace->Trc('I', 1, 0x0b400, $self->{PubAddr} . ' ' . $args{typ} . '|' . $args{account} . ' ' . $args{wert}, join(' ', $@));
   }
 
   #Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);

@@ -87,7 +87,8 @@ $VERSION = $prg->version($VERSION);
 # Falls Reentranz ueber das Lockfile unterbunden wird, ist es dennoch sinnvoll 
 # FxAssist in die crontab eintrutragen, falls es mal zu einem Programmabsturz kommt
 while (1) {
-  $prg->action();
+  $prg->EA_Kommunication();
+  $prg->getSignals();
 }
 
 Trace->Exit(0, 1, 0x00002, Configuration->config('Prg', 'Name'), $VERSION);

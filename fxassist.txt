@@ -195,14 +195,11 @@
 # Proc Nr. 1 Meldungen: 0x03100-0x031ff
 #            Fehler:    0x0b100-0x0b1ff
 0x03100 = Kommando: <%s> <%s>
-0x03101 = Kommando <%s> erfolgreich versendet.
+0x03101 = Kommando <%s> erfolgreich versendet (%s).
 0x03102 = Antwort auf Kommando <%s> empfangen: <%s>.
 
 0x0b100 = Keine Kommando definifert <%s>
 0x0b101 = Kommando <%s> nicht erfolgreich versendet <%s>.
-0x0b102 = Keine Antwort auf Kommando <%s> empfangen <%s>.
-0x0b103 = Keine gueltige Antwort auf Kommando <%s> empfangen.
-0x0b104 = Keine gueltige Antwort auf Kommando <%s> empfangen.
 
 ##########################################################################################
 # Procedure MQL4_ZMQ::getInfo
@@ -259,5 +256,16 @@
 0x03800 = Kommando erfolgreich gesendet: <%s> <%s>
 
 0x0b800 = Kommando nicht gesendet: <%s> <%s>
+
+##########################################################################################
+# Procedure MQL4_ZMQ::getResponse
+# Proc Nr. 9 Meldungen: 0x03900-0x039ff
+#            Fehler:    0x0b900-0x0b9ff
+0x03900 = Response empfangen <%s>
+0x03901 = Message extrahiert <%s>
+0x03902 = Komponenten aus Message extrahiert <%s>
+
+0x0b900 = Keine Response in der Queue gefunden
+0x0b901 = Ungueltiger Aufbau des Response <%s>
 
 [english]

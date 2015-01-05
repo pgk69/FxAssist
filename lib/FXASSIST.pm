@@ -461,22 +461,37 @@ sub EA_Kommunikation {
     #################################################################
     #     Procedure zum Einlesen der EA Response
     sleep(shift);
-    while (my %response = ($self->{ZMQ}->getResponse())) {
+    while (my $response = ($self->{ZMQ}->getResponse())) {
       # Antwort: response|[account name] {"response": "[response]"}
-      #    account : [Accountnummer]
-      #    status  : [0|1]
-      #    ticket  : [Ticket ID]
-      #    signal  : [Signal ID]
-      #    msg     : [Meldungstext]
-      if (defined($self->{Account}->{$response{account}})) {
-        if (my $id = $self->{Account}->{$response{account}}->{Signal}->{$response{ticket}}->{Parameter}) {
-          if ($response{status} && $response{ticket} && $id) {
-            if ($response eq 'set')   {$self->{Account}->{$response{account}}->{Signal}->{$id}->{Activ} = 1}
-            if ($response eq 'unset') {$self->{Account}->{$response{account}}->{Signal}->{$id}->{Activ} = 0}
-            $self->{Account}->{$response{account}}->{Signal}->{$id}->{Ticket} = $response{ticket};
+      #              account : Betroffenes Konto
+      #              referenz: [Referenz ID]
+      #              cmd:      Original Kommando
+      #              status  : Gesamtergebnis: 0: Nicht erfolgreich
+      #                                        1: Erfolgreich
+      #
+      #              Weitere moegliche Elemente:
+      #              ticket   : Ticket ID 
+      #              msg      : Nachrichten Freitext
+      #              name     : Parameter Name
+      #              value    : abgefragter/zu setzender Wert
+      if (defined($self->{Account}->{$response->{account}})) {
+        my $account  = $response->{account};
+        my $referenz = $response->{referenz};
+        my $cmd      = $response->{cmd};
+        my $status   = $response->{status};
+
+        my $ticket   = $response->{ticket};
+        
+        my $accounthash   = $self->{Account}->{$account};
+        my $parameterhash = $accounthash->{Signal}->{$signalid}->{Parameter};
+        
+        if (my $signalid = $parameterhash->{signal}) {
+          if ($status && $ticket && $signalid) {
+            if ($cmd eq 'set')   {$accounthash->{Signal}->{$signalid}->{Activ} = 1}
+            if ($cmd eq 'unset') {$accounthash->{Signal}->{$signalid}->{Activ} = 0}
+            $accounthash->{Signal}->{$signalid}->{Ticket} = $ticket;
           } 
-          delete ($self->{Account}->{$response{account}}->{Signal}->{$id}->{Parameter});
-          # Todo: Gelegentlich mal $self->{Kommandos} ueberpruefen und aufraeumen
+          delete ($accounthash->{Signal}->{$signalid}->{Parameter});
         } 
       }
     }
@@ -527,11 +542,11 @@ sub EA_Kommunikation {
                 $self->{ZMQ}->cmd($self->{Account}->{$account}->{Signal}->{$id}->{Parameter});
               } else {
                 # Signalschliessung wurde noch nicht versendet
-                my %parameter = {'account',      $account,
+                my $parameter = {'account',      $account,
                                  'cmd',          'unset',
-                                 'ticket',       $self->{Account}->{$account}->{Signal}->{$id}->{Ticket};
-                $parameter{referenz} = $self->{ZMQ}->cmd(%parameter);
-                $self->{Account}->{$account}->{Signal}->{$id}->{Parameter} = %parameter; 
+                                 'ticket',       $self->{Account}->{$account}->{Signal}->{$id}->{Ticket}};
+                $parameter->{referenz} = $self->{ZMQ}->cmd($parameter);
+                $self->{Account}->{$account}->{Signal}->{$id}->{Parameter} = $parameter; 
               }
             }  
           } else {
@@ -549,7 +564,7 @@ sub EA_Kommunikation {
                 my $orderart;
                 if ($self->{Store}->{Signal}->{$id}->{Signal} =~ /Long$/)  {$orderart = 0}
                 if ($self->{Store}->{Signal}->{$id}->{Signal} =~ /Short$/) {$orderart = 1}
-                my %parameter = {'account',      $account,
+                my $parameter = {'account',      $account,
                                  'cmd',          'set',
                                  'type',         $orderart, 
                                  'pair',         $self->{Account}->{$account}->{Symbol}, 
@@ -557,8 +572,8 @@ sub EA_Kommunikation {
                                  'comment',      'Opened by FxAssist:ST:' . $id, 
                                  'signal',       $id,
                                  'lot',          '0.5'};
-                $parameter{referenz} = $self->{ZMQ}->cmd(%parameter);
-                $self->{Account}->{$account}->{Signal}->{$id}->{Parameter} = %parameter; 
+                $parameter->{referenz} = $self->{ZMQ}->cmd($parameter);
+                $self->{Account}->{$account}->{Signal}->{$id}->{Parameter} = $parameter; 
               }
             } else {
               # Signal nicht valide -> Signal fuer diesen Account loeschen

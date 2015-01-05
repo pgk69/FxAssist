@@ -191,163 +191,6 @@ sub cmd {
   #              value       : abgefragter/zu setzender Wert
   #
   #    Ausgabe: Referenz ID des Kommandos (Unique ID)
-  #     
-  #    Kommando get_parameter:
-  #
-  #    Request Value: cmd|[account name] {"cmd":      "get_parameter",
-  #                                       "referenz": "[Referenz ID]",
-  #                                       "name":     "[abgefragter Wert]"}
-  #                   cmd|testaccount {"cmd":      "set_parameter",
-  #                                    "referenz": "4162F712-1DD2-11B2-B17E-C09EFE1DC403",
-  #                                    "name":     "pair"}
-  #                       
-  #    Erwarteter Response: Get Parameter
-  #              account:  [Accountnummer]
-  #              referenz: [Referenz ID]
-  #              status:   0: Nicht erfolgreich
-  #                        1: Erfolgreich
-  #              msg:      "Parameter read [Name]:[Wert]"
-  #              name:     [Name]
-  #              value:    [Wert]
-  #
-  #
-  #  Kommando set_parameter:
-  #
-  #    Request Value: cmd|[account name] {"cmd":      "set_parameter",
-  #                                       "referenz": "[Referenz ID]",
-  #                                       "name":     "[zu setzender Parameter]",
-  #                                       "value":    "[zu setzender Wert]"}
-  #                   cmd|testaccount {"cmd":      "set_parameter",
-  #                                    "referenz": "4162F712-1DD2-11B2-B17E-C09EFE1DC403",
-  #                                    "name":     "Wait_for_Message",
-  #                                    "value":    "0"}
-  #                       
-  #    Erwarteter Response: Set Parameter 
-  #              account:  [Accountnummer]
-  #              referenz: [Referenz ID]
-  #              status:   0: Nicht erfolgreich
-  #                        1: Erfolgreich
-  #              msg:      "Parameter set [Name]:[Value]"
-  #              name:     [Name]
-  #              value:    [Wert]
-  #    
-  #
-  #  Kommando set:
-  #
-  #    New Trade/Order: cmd|[account name] {"cmd":          "set",
-  #                                         "referenz":     "[Referenz ID]",
-  #                                         "type":         "[Orderart]", 
-  #                                         "pair":         "[gehandeltes Symbol]", 
-  #                                         "open_price":   "[Eröffnungskurs]",
-  #                                         "slippage":     "[Slippage]", 
-  #                                         "magic_number": "[Magic Number]", 
-  #                                         "comment":      "[Kommentar]", 
-  #                                         "take_profit":  "[TakeProfit]", 
-  #                                         "stop_loss":    "[StoppLoss]", 
-  #                                         "signal":       "[Signal ID]", 
-  #                                         "lot":          "[Anzahl Lots]"}
-  #                     cmd|testaccount {"cmd":          "set",
-  #                                      "referenz":     "4162F712-1DD2-11B2-B17E-C09EFE1DC403",
-  #                                      "type":         "2", 
-  #                                      "pair":         "EURUSD", 
-  #                                      "open_price":   "1.25", 
-  #                                      "slippage":     "0.1", 
-  #                                      "magic_number": "11041963", 
-  #                                      "comment":      "Opened by FxAssist",  
-  #                                      "take_profit":  "1.2503", 
-  #                                      "stop_loss":    "1.2450", 
-  #                                      "signal":       "1225", 
-  #                                      "lot":          "0.5"}
-  #  
-  #    Trade Types:
-  #       0 = (MQL4) OP_BUY       - buying position,
-  #       1 = (MQL4) OP_SELL      - selling position,
-  #       2 = (MQL4) OP_BUYLIMIT  - buy limit pending position,
-  #       3 = (MQL4) OP_SELLLIMIT - sell limit pending position,
-  #       4 = (MQL4) OP_BUYSTOP   - buy stop pending position,
-  #       5 = (MQL4) OP_SELLSTOP  - sell stop pending position.
-  #
-  #    Erwarteter Response: Trade set
-  #              account:  [Accountnummer]
-  #              referenz: [Referenz ID]
-  #              status:   0: Nicht erfolgreich
-  #                        1: Erfolgreich
-  #              ticket:   [Ticket ID]
-  #              msg:      "Order has been set: [Ticket ID]"
-  #                
-  #  
-  #  Kommando reset:
-  #   
-  #    Update Trade:  cmd|[account name] {"cmd":         "reset",
-  #                                       "referenz":    "[Referenz ID]",
-  #                                       "ticket":      "[Ticket ID]", 
-  #                                       "take_profit": "[TakeProfit]", 
-  #                                       "stop_loss":   "[StoppLoss]"}
-  #                   cmd|testaccount {"cmd":         "reset",
-  #                                    "referenz":    "4162F712-1DD2-11B2-B17E-C09EFE1DC403",
-  #                                    "ticket":      "43916144", 
-  #                                    "take_profit": "1.2515", 
-  #                                    "stop_loss":   "1.2502"}
-  #    
-  #    Update Order neu:  cmd|[account name] {"cmd":         "reset",
-  #                                           "ticket":      "[Ticket ID]", 
-  #                                           "take_profit": "[TakeProfit]", 
-  #                                           "stop_loss":   "[StoppLoss]",
-  #                                           "open_price":  "[Eröffnungskurs]"}
-  #                       cmd|testaccount {"cmd":         "reset",
-  #                                        "referenz":    "4162F712-1DD2-11B2-B17E-C09EFE1DC403",
-  #                                        "ticket":      "43916144", 
-  #                                        "take_profit": "1.2515", 
-  #                                        "stop_loss":   "1.2502",
-  #                                        "open_price":  "1.2507"}
-  #    
-  #    Erwarteter Response: Trade reset
-  #              account:  [Accountnummer]
-  #              referenz: [Referenz ID]
-  #              status:   0: Nicht erfolgreich
-  #                        1: Erfolgreich
-  #              ticket:   [Ticket ID]
-  #              msg:      "Order has been modified: [Ticket ID]"
-  #
-  #
-  #  Kommando unset:
-  #
-  #    Close Trade/Order: cmd|[account name] {"cmd":      "unset",
-  #                                           "referenz": "[Referenz ID]",
-  #                                           "ticket":   "[Ticket ID]"}
-  #                       cmd|testaccount {"cmd":      "unset",
-  #                                        "referenz": "4162F712-1DD2-11B2-B17E-C09EFE1DC403",
-  #                                        "ticket":   "43916144"}
-  #
-  #    Erwarteter Response: Trade unset
-  #              account:  [Accountnummer]
-  #              referenz: [Referenz ID]
-  #              status:   0: Nicht erfolgreich
-  #                        1: Erfolgreich
-  #              ticket:   [Ticket ID]
-  #              msg:      "Order has been closed: [Ticket ID]"
-  #     
-  #  Kommando draw:
-  #
-  #    Draw Object:   cmd|[account name] {"cmd":         "draw",
-  #                                       "referenz":    "[Referenz ID]",
-  #                                       "obj_type":    "[Objekt Type]", 
-  #                                       "open_price":  "[Eröffnungskurs]", 
-  #                                       "close_price": "[Schlußkurs]",
-  #                                       "close_time":  "[Schlußzeit]",
-  #                                       "prediction":  "[Prediction]"}
-  #                   cmd|testaccount {"cmd":         "draw",
-  #                                    "referenz":    "4162F712-1DD2-11B2-B17E-C09EFE1DC403",
-  #                                    "object_type": "OBJ_ARROW", 
-  #                                    "open_price":  "1.2054", 
-  #                                    "close_time":  "753324221",
-  #                                    "close_price": "1.2234",
-  #                                    "prediction":  "0.7"}
-  #
-  #    Erwarteter Response: Draw
-  #              account:  [Accountnummer]
-  #              status:   0: Nicht erfolgreich
-  #                        1: Erfolgreich
     
   my $self = shift;
   my %args = (@_);
@@ -395,53 +238,16 @@ sub getResponse {
   #
   #     Ausgabe: Argumenthash mit mindestens den Elementen 
   #              account : Betroffenes Konto
+  #              referenz: [Referenz ID]
+  #              cmd:      Original Kommando
   #              status  : Gesamtergebnis: 0: Nicht erfolgreich
   #                                        1: Erfolgreich
   #
   #              Weitere moegliche Elemente:
-  #              referenz : Signal ID
   #              ticket   : Ticket ID 
   #              msg      : Nachrichten Freitext
   #              name     : Parameter Name
   #              value    : abgefragter/zu setzender Wert
-  #     
-  #  Responses:
-  #    Get Parameter:
-  #                 response|[account name] {"account":  "[Accountnummer]",
-  #                                          "referenz": "[Referenz ID]",
-  #                                          "status":   "[0|1]",
-  #                                          "msg":      "Parameter read [Name]:[Wert]",
-  #                                          "name":     "[abgefragter Parameter]",
-  #                                          "value":    "[abgefragter Wert]"}
-  #  
-  #    Set Parameter:
-  #                 response|[account name] {"account":  "[Accountnummer]",
-  #                                          "referenz": "[Referenz ID]",
-  #                                          "status":   "[0|1]",
-  #                                          "msg":      "Parameter read [Name]:[Wert]",
-  #                                          "name":     "[zu setzender Parameter]",
-  #                                          "value":    "[zu setzender Wert]"}
-  #  
-  #    Trade set:   response|[account name] {"account":  "[Accountnummer]"
-  #                                          "referenz": "[Referenz ID]",
-  #                                          "status":   "[0|1]",
-  #                                          "ticket":   "[Ticket ID]",
-  #                                          "msg":      "Order has been set: [Ticket ID]"}
-  #  
-  #    Trade reset: response|[account name] {"account":  "[Accountnummer]",
-  #                                          "referenz": "[Referenz ID]",
-  #                                          "status":   "[0|1]",
-  #                                          "ticket":   "[Ticket ID]",
-  #                                          "msg":      "Order has been modified: [Ticket ID]"}
-  #  
-  #    Trade unset: response|[account name] {"account":  "[Accountnummer]",
-  #                                          "referenz": "[Referenz ID]",
-  #                                          "status":   "[0|1]",
-  #                                          "ticket":   "[Ticket ID]",
-  #                                          "msg":      "Order has been closed: [Ticket ID]"}
-  #  
-  #    Draw:        response|[account name] {"account":  "[Accountnummer]",
-  #                                          "status":   "[0|1]"}
     
   my $self = shift;
   my %args = (@_);

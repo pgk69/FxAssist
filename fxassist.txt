@@ -140,7 +140,7 @@
 
 
 ##########################################################################################
-# Procedure action
+# Procedure EA_Kommunikation
 # Proc Nr. 5 Meldungen: 0x02500-0x025ff
 #            Fehler:    0x0a500-0x0a5ff
 
@@ -163,7 +163,7 @@
 0x02700 = Letzter Aufruf war ein <%s>. Aktueller Aufruf ist ein <%s>.
 0x02701 = Hole Signal
 0x02702 = Hole Signal erfolgreich. Status <%s> Naechste Operation <%s>.
-0x02703 = Neues Signal ID: <%s>
+0x02703 = Neues Signal ID: <%s> UUID: <%s>
 
 0x0a700 = Hole Signal nicht erfolgreich. Status <%s> Naechste Operation <%s>.
 
@@ -172,7 +172,7 @@
 # Procedure doGetOut
 # Proc Nr. 8 Meldungen: 0x02800-0x028ff
 #            Fehler:    0x0a800-0x0a8ff
-0x02800 = Teste Status von Signal <%s>
+0x02800 = Teste Status von Signal <%s> UUID: <%s>
 0x02801 = Seite vorhanden (%s). Signal <%s> im Archiv -> deaktivieren
 0x02802 = Seite nicht vorhanden (%s). Signal <%s> noch nicht im Archiv
 0x02803 = Naechste Operation <%s>.
@@ -182,13 +182,19 @@
 
 
 ##########################################################################################
-# Procedure sendMsg
+# Procedure syncAccount
 # Proc Nr. 9 Meldungen: 0x02900-0x029ff
 #            Fehler:    0x0a900-0x0a9ff
-0x02900 = %s Position fuer Signal <%s>. Telegramm: <%s>
+0x0a900 = Account <%s> Ticket <%s> Kommentar <%s> nicht in unserer Zuständigkeit.
 0x02901 = %s Position fuer Signal <%s> erfolgreich.
 
-0x0a900 = %s Position fuer Signal <%s> nicht erfolgreich.
+
+
+##########################################################################################
+# Procedure EA_Kommunikation
+# Proc Nr. 10 Meldungen: 0x02a00-0x02aff
+#             Fehler:    0x0aa00-0x0aaff
+
 
 ##########################################################################################
 # Procedure MQL4_ZMQ::cmd
@@ -247,7 +253,7 @@
 #            Fehler:    0x0b700-0x0b7ff
 0x03700 = Socket erfolgreich binded: <%s> <%s>
 
-0x0b700 = Socket nicht binded: <%s> <%s>
+0x0b700 = Socket nicht binded: <%s> <%s> <%s>
 
 ##########################################################################################
 # Procedure MQL4_ZMQ::_send

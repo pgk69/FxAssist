@@ -48,10 +48,9 @@ use Utils;
 #
 # Module
 #
-use Data::UUID;
 use JSON::PP;
 use ZMQ::FFI;
-use ZMQ::FFI::Constants qw(ZMQ_PUB ZMQ_SUB ZMQ_DONTWAIT ZMQ_SUBSCRIBE ZMQ_NOBLOCK);
+use ZMQ::FFI::Constants qw(ZMQ_PUB ZMQ_REP ZMQ_DONTWAIT ZMQ_SUBSCRIBE ZMQ_NOBLOCK);
 use Time::HiRes q(usleep);
 
 #
@@ -116,22 +115,21 @@ sub _init {
   # Initialisierung JSON Objekt
   $self->{JSON}    = JSON::PP->new->utf8;
   
-  # Initialisierung UUID Objekt
-  $self->{UUID}    = Data::UUID->new;
-  
   # ZeroMQ Initialisierung pub/sub
   #### Context
   $self->{Context} = ZMQ::FFI->new();
+  my ($major, $minor, $patch) = $self->{Context}->version;
+  Trace->Trc('S', 1, "ZMQ Version ${major}.${minor}.${patch}");
 
-  ### Subscriber ####
-  $self->{SubAddr} = Utils::extendString($args{SubAddr}, "BIN|$Bin|SCRIPT|" . uc($Script));
-  $self->{SubSock} = $self->{Context}->socket(ZMQ_SUB);
-  $self->_connectSocket();
-  
+  ### Reply ####
+  $self->{RepAddr} = Utils::extendString($args{RepAddr}, "BIN|$Bin|SCRIPT|" . uc($Script));
+  $self->{RepSock} = $self->{Context}->socket(ZMQ_REP);
+  $self->_bindSocket('Socket', 'RepSock', 'Addr', 'RepAddr');
+
   ### Publisher ####
   $self->{PubAddr} = Utils::extendString($args{PubAddr}, "BIN|$Bin|SCRIPT|" . uc($Script));
   $self->{PubSock} = $self->{Context}->socket(ZMQ_PUB);
-  $self->_bindSocket();
+  $self->_bindSocket('Socket', 'PubSock', 'Addr', 'PubAddr');
   
   Trace->Trc('S', 1, 0x00102, $self->{subroutine});
   $self->{subroutine} = $merker;
@@ -164,13 +162,14 @@ sub DESTROY {
 }
 
 
-sub cmd {
+sub sendMT4 {
   #################################################################
   #     Kommandoversand an den MT4
   #     Proc 1
   #     Eingabe: Argumenthash mit mindestens den Elementen 
   #              cmd     : Auszuführendes Kommando
   #              account : Betroffenes Konto
+  #              uuid    : UUID
   #
   #              Weitere moegliche Elemente:
   #              type        : Orderart
@@ -190,7 +189,8 @@ sub cmd {
   #              name        : Parameter Name
   #              value       : abgefragter/zu setzender Wert
   #
-  #    Ausgabe: Referenz ID des Kommandos (Unique ID)
+  #    Ausgabe: 0: Fehler
+  #             1: ok
     
   my $self = shift;
   my %args = (@_);
@@ -202,21 +202,28 @@ sub cmd {
   my $rc = 0;
 
   if (defined($args{cmd})) {
-    my $cmd = "cmd|$args{account} ";
+    my $cmd = "$args{cmd}|$args{account} ";
+    delete($args{cmd});
     delete($args{account});
-    # Erzeugen einer eindeutigen Referenz ID
-    $args{referenz} = $self->{UUID}->create_str() if (!defined($args{referenz}));
     $cmd .= $self->{JSON}->utf8(0)->encode(\%args);
 
     Trace->Trc('I', 1, 0x03100, $cmd, ZMQ_DONTWAIT);
 
 #    eval {$self->{PubSock}->send($cmd, ZMQ_DONTWAIT)};
 #    if (!$@) {
-    if ($rc = $self->_send($cmd)) {
-      $rc = $args{referenz};
-      Trace->Trc('I', 1, 0x03101, $cmd, $rc);
-    } else {
-      Trace->Trc('I', 1, 0x0b101, $cmd, $rc);
+    $rc = $self->_bindSocket('Socket', 'PubSock', 'Addr', 'PubAddr');
+
+    if ($rc) {
+      eval {$rc = $self->{PubSock}->send($cmd, ZMQ_DONTWAIT)};
+      if ($@) {
+        # Fehler
+        $rc = 0;
+        Trace->Trc('I', 1, 0x0b101, $cmd, $rc);
+      } else {
+        # Alles ok
+        $rc = 1;
+        Trace->Trc('I', 1, 0x03101, $cmd, $rc);
+      }
     }
   } else {
     Trace->Trc('I', 1, 0x0b100, join(' ', %args));
@@ -229,16 +236,19 @@ sub cmd {
 }
 
 
-sub getResponse {
+sub readMT4 {
   #################################################################
-  #     Responseabfrage vom MT4
+  #     Abfrage der Antwort des MT4
   #     Proc 9
   #     Eingabe: Argumenthash mit den Werten
   #              account : Betroffenes Konto
   #
   #     Ausgabe: Argumenthash mit mindestens den Elementen 
   #              account : Betroffenes Konto
-  #              referenz: [Referenz ID]
+  #              msgtype : response|info|status
+  #              msgsubj : bridge|tick|account|ema|order|<leer>
+  
+  #              uuid:     [UUID]
   #              cmd:      Original Kommando
   #              status  : Gesamtergebnis: 0: Nicht erfolgreich
   #                                        1: Erfolgreich
@@ -257,31 +267,88 @@ sub getResponse {
   Trace->Trc('S', 2, 0x00001, $self->{subroutine}, join(' ', %args));
   
   my $rc = 0;
-
+  my $message;
+  
   # Lese die gesamte Message aus der Queue
-  my $message = $self->_recv();
+  $rc = $self->_bindSocket('Socket', 'RepSock', 'Addr', 'RepAddr');
+
+  if ($rc) {
+    eval {$message = $self->{RepSock}->recv(ZMQ_DONTWAIT)};
+    if ($@) {
+      # Fehler
+      $rc = 0;
+      $message = undef;
+      Trace->Trc('I', 3, 0x0b600, $self->{RepAddr}, join(' ', $@));
+    } else {
+      # Alles ok
+      $rc = 1;
+      Trace->Trc('I', 2, 0x03600, $self->{RepAddr}, join(' ', $@));
+    }
+  }
   if ($message) {
     Trace->Trc('I', 2, 0x03900, $message);
-    if ($message =~ /^response\|$args{account} \{(.*)\}$/) {
-      $message = $1;
+    # Aufbau der Message
+    # Statusmeldung: bridge|[account name] {"status": "up",
+    #                                       "pair":   "[gehandeltes Symbol]", 
+    #                                       "time":   "[aktueller Zeitstempel]"}
+    #
+    # Tickinfo:      tick|[account name] {"pair": "[gehandeltes Symbol]",
+    #                                     "bid":  "[Geldkurs]",
+    #                                     "ask":  "[Briefkurs]",
+    #                                     "time": "[aktueller Zeitstempel]"}
+    #
+    # Accountinfo:   account|[account name] {"leverage":   "[Leverage]",
+    #                                        "balance":    "[Balance]",
+    #                                        "margin":     "[Margin]",
+    #                                        "freemargin": "[freie Margin]"}          
+    #
+    # EMAinfo:       ema|[account name] {"pair":      "[gehandeltes Symbol]",
+    #                                    "ema_long":  "[EMA long]",
+    #                                    "ima_long":  "[iMA long]",
+    #                                    "ema_short": "[EMA short]",
+    #                                    "ima_short": "[iMA short]"}          
+    #
+    # Orders:       orders|[account name] {"pair":        "[gehandeltes Symbol]", 
+    #                                      "type":        "[Orderart]", 
+    #                                      "ticket":      "[Ticket ID]", 
+    #                                      "open_price":  "[Eröffnungskurs]", 
+    #                                      "take_profit": "[TakeProfit]", 
+    #                                      "stop_loss":   "[StoppLoss]", 
+    #                                      "open_time":   "[Eröffnungszeit]",  
+    #                                      "expire_time": "[Gültigkeitsdauer]", 
+    #                                      "lot":         "[Anzahl Lots]"}
+    #
+    # Response:      response|[account name] {"account":  "[Accountnummer]",
+    #                                         "uuid":     "[UUID]",
+    #                                         "cmd":      "get_parameter",
+    #                                         "status":   "[0|1]",
+    #                                         "msg":      "Parameter read [Name]:[Wert]",
+    #                                         "name":     "[abgefragter Parameter]",
+    #                                         "value":    "[abgefragter Wert]"}
+
+    if ($message =~ /^(response|bridge|tick|account|ema|orders)\|$args{account} \{(.*)\}$/) {
+      my $msgtype = $1;
+      $message = $2;
+      $rc = decode_json($message);
       Trace->Trc('I', 2, 0x03901, $message);
       $rc->{account} = $args{account};
-      my $start_position = 0;
-      my $end_position = length($message);
-      while (($start_position >= 0) && ($end_position > $start_position)) {
-        $start_position = index('"', $message, 0) + 1;
-        $end_position   = index('"', $message, $start_position + 1);
-        if (($start_position >= 0) && ($end_position > $start_position)) {
-          my $key = lc(substr($message, $start_position, $end_position - $start_position));
-          $start_position = index('"', $message, $end_position) + 1;
-          $end_position   = index('"', $message, $start_position + 1);
-          if (($start_position >= 0) && ($end_position > $start_position)) {
-            my $value = substr($message, $start_position, $end_position - $start_position);
-            $message = substr($message, $end_position);
-            $rc->{$key} = $value;
-          }
-        }
-      }
+      $rc->{msgtype} = $msgtype;
+#      my $start_position = 0;
+#      my $end_position = length($message);
+#      while (($start_position >= 0) && ($end_position > $start_position)) {
+#        $start_position = index('"', $message, 0) + 1;
+#        $end_position   = index('"', $message, $start_position + 1);
+#        if (($start_position >= 0) && ($end_position > $start_position)) {
+#          my $key = lc(substr($message, $start_position, $end_position - $start_position));
+#          $start_position = index('"', $message, $end_position) + 1;
+#          $end_position   = index('"', $message, $start_position + 1);
+#          if (($start_position >= 0) && ($end_position > $start_position)) {
+#            my $value = substr($message, $start_position, $end_position - $start_position);
+#            $message = substr($message, $end_position);
+#            $rc->{$key} = $value;
+#          }
+#        }
+#      }
       if ($rc) {
         # Komponenten erfolgreich aus Message extrahiert
         Trace->Trc('I', 1, 0x03902, join(' ', %{$rc}));
@@ -295,193 +362,6 @@ sub getResponse {
   
   Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
   $self->{subroutine} = $merker;
-
-  return $rc;
-}
-
-
-sub getInfo {
-  #################################################################
-  #     Information vom MT4 abfragen
-  #     Proc 2
-  #     Eingabe: Argumenthash mit mindestens einem Element 'cmd'
-  #              mit Elementen: typ:  status|info
-  #                             wert: bridge|tick|account|ema|order
-  #              Mögliche Wert: status   -> bridge
-  #                             info     -> tick
-  #                             info     -> account
-  #                             info     -> ema
-  #                             info     -> order
-  #     Ausgabe: Status der Bridge
-  #
-  my $self = shift;
-  my %args = (@_);
-
-  my $merker          = $self->{subroutine};
-  $self->{subroutine} = (caller(0))[3];
-  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, join(' ', %args));
-  
-  my $rc = 0;
-
-  # Get Data with next Tick
-  $rc = $self->_recv();
-#  if (!$@) {
-  if (!$rc) {
-    Trace->Trc('I', 1, 0x03200, $args{typ} . '|' . $args{account} . ' ' . $args{wert}, $rc);
-  } else {
-    Trace->Trc('I', 1, 0x0b200, $args{typ} . '|' . $args{account} . ' ' . $args{wert});
-  }  
-
-  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
-  $self->{subroutine} = $merker;
-
-  return $rc;
-}
-
-
-sub subscribeAccount {
-  #################################################################
-  #     Kontoinformationen subscriben
-  #     Proc 3
-  #     Eingabe: typ     -> response
-  #              Account -> Accountnummer
-  #              wert    -> optionaler Wert
-  #     Ausgabe: O: Account nicht verbunden
-  #              1: Account verbunden
-  #
-  my $self = shift;
-  my %args = (@_);
-
-  #my $merker          = $self->{subroutine};
-  #$self->{subroutine} = (caller(0))[3];
-  #Trace->Trc('S', 2, 0x00001, $self->{subroutine}, join(' ', %args));
-  
-  my $rc = 0;
-
-  my $subscribestring = $args{typ} . '|' . $args{account};
-  if (defined($args{wert})) {
-    $subscribestring .= ' ' . $args{wert};
-  }
-  eval {$self->{SubSock}->subscribe($subscribestring)};
-  if (!$@) {
-    $rc = 1;
-    $self->{Status}->{SubSock} = 1;
-    Trace->Trc('I', 1, 0x03300, $self->{PubAddr} . ' ' . $subscribestring, join(' ', $@));
-  } else {
-    $rc = 0;
-    $self->{Status}->{SubSock} = 0;
-    Trace->Trc('I', 1, 0x0b300, $self->{PubAddr} . ' ' . $subscribestring, join(' ', $@));
-  }
-  
-  #Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
-  #$self->{subroutine} = $merker;
-
-  return $rc;
-}
-
-
-sub unsubscribeAccount {
-  #################################################################
-  #     Kontoinformationen unsubscriben
-  #     Proc 4
-  #     Eingabe: typ     -> response
-  #              Account -> Accountnummer
-  #              wert    -> optionaler Wert
-  #     Ausgabe: O: Account nicht verbunden
-  #              1: Account verbunden
-  #
-  my $self = shift;
-  my %args = (@_);
-
-  #my $merker          = $self->{subroutine};
-  #$self->{subroutine} = (caller(0))[3];
-  #Trace->Trc('S', 2, 0x00001, $self->{subroutine}, join(' ', %args));
-  
-  my $rc = 0;
-
-  eval {$self->{SubSock}->unsubscribe($args{typ} . '|' . $args{account} . ' ' . $args{wert})};
-  if (!$@) {
-    $rc = 1;
-    $self->{Status}->{SubSock} = 1;
-    Trace->Trc('I', 1, 0x03400, $self->{PubAddr} . ' ' . $args{typ} . '|' . $args{account} . ' ' . $args{wert}, join(' ', $@));
-  } else {
-    $rc = 0;
-    $self->{Status}->{SubSock} = 0;
-    Trace->Trc('I', 1, 0x0b400, $self->{PubAddr} . ' ' . $args{typ} . '|' . $args{account} . ' ' . $args{wert}, join(' ', $@));
-  }
-
-  #Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
-  #$self->{subroutine} = $merker;
-
-  return $rc;
-}
-
-
-sub _connectSocket {
-  #################################################################
-  #     SubSocket connecten
-  #     Proc 5
-  #     Eingabe:
-  #     Ausgabe: O: Socket nicht connected
-  #              1: Socket connected
-  #
-  my $self = shift;
-  my %args = (@_);
-
-  #my $merker          = $self->{subroutine};
-  #$self->{subroutine} = (caller(0))[3];
-  #Trace->Trc('S', 2, 0x00001, $self->{subroutine}, join(' ', %args));
-  
-  if (!$self->{Status}->{SubSock}) {
-    eval {$self->{SubSock}->connect($self->{SubAddr})};
-    if (!$@) {
-      $self->{Status}->{SubSock} = 1;
-      Trace->Trc('I', 1, 0x03500, $self->{SubAddr}, join(' ', $@));
-    } else {
-      $self->{Status}->{SubSock} = 0;
-      Trace->Trc('I', 1, 0x0b500, $self->{SubAddr}, join(' ', $@));
-    }
-  }
-  
-  #Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $self->{Status}->{SubSock});
-  #$self->{subroutine} = $merker;
-
-  return $self->{Status}->{SubSock};
-}
-
-
-sub _recv {
-  #################################################################
-  #     SubSocket connecten
-  #     Proc 6
-  #     Eingabe: $1: Flags
-  #     Ausgabe: O: Socket nicht connected
-  #              1: Socket connected
-  #
-  my $self = shift;
-  my %args = (@_);
-
-  #my $merker          = $self->{subroutine};
-  #$self->{subroutine} = (caller(0))[3];
-  #Trace->Trc('S', 2, 0x00001, $self->{subroutine}, join(' ', %args));
-  
-  my $rc = $self->_connectSocket();
-
-  if ($rc) {
-    eval {$rc = $self->{SubSock}->recv(ZMQ_DONTWAIT)};
-    if ($@) {
-      # Fehler
-      $rc = 0;
-      Trace->Trc('I', 1, 0x0b600, $self->{SubAddr}, join(' ', $@));
-    } else {
-      # Alles ok
-      $rc = 1;
-      Trace->Trc('I', 1, 0x03600, $self->{SubAddr}, join(' ', $@));
-    }
-  }
-  
-  #Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
-  #$self->{subroutine} = $merker;
 
   return $rc;
 }
@@ -502,62 +382,136 @@ sub _bindSocket {
   #$self->{subroutine} = (caller(0))[3];
   #Trace->Trc('S', 2, 0x00001, $self->{subroutine}, join(' ', %args));
   
-  if (!$self->{Status}->{PubSock}) {
-    eval {$self->{PubSock}->bind($self->{PubAddr})};
+  if (!$self->{Status}->{$args{Socket}}) {
+    eval {$self->{$args{Socket}}->bind($self->{$args{Addr}})};
     if (!$@) {
-      $self->{Status}->{PubSock} = 1;
-      Trace->Trc('I', 1, 0x03700, $self->{PubAddr}, join(' ', $@));
+      $self->{Status}->{$args{Socket}} = 1;
+      Trace->Trc('I', 1, 0x03700, $args{Addr}, $self->{$args{Addr}});
     } else {
-      $self->{Status}->{PubSock} = 0;
-      Trace->Trc('I', 1, 0x0b700, $self->{PubAddr}, join(' ', $@));
+      $self->{Status}->{$args{Socket}} = 0;
+      Trace->Trc('I', 1, 0x0b700, $args{Addr}, $self->{$args{Addr}}, join(' ', $@));
     }
   }
   
   #Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $self->{Status}->{PubSock});
   #$self->{subroutine} = $merker;
 
-  return $self->{Status}->{PubSock};
+  return $self->{Status}->{$args{Socket}};
 }
 
 
-sub _send {
-  #################################################################
-  #     An PubSocket binden
-  #     Proc 8
-  #     Eingabe: $1: Kommando
-  #              $2: Flags
-  #     Ausgabe: O: Socket nicht binded
-  #              1: Socket binded
-  #
-  my $self = shift;
-  my $cmd  = shift;
+#sub getInfo {
+#  #################################################################
+#  #     Information vom MT4 abfragen
+#  #     Proc 2
+#  #     Eingabe: Argumenthash mit mindestens einem Element 'cmd'
+#  #              mit Elementen: typ:  status|info
+#  #                             wert: bridge|tick|account|ema|order
+#  #              Mögliche Wert: status   -> bridge
+#  #                             info     -> tick
+#  #                             info     -> account
+#  #                             info     -> ema
+#  #                             info     -> order
+#  #     Ausgabe: Status der Bridge
+#  #
+#  my $self = shift;
+#  my %args = (@_);
+#
+#  my $merker          = $self->{subroutine};
+#  $self->{subroutine} = (caller(0))[3];
+#  Trace->Trc('S', 2, 0x00001, $self->{subroutine}, join(' ', %args));
+#  
+#  my $rc = undef;
+#
+#  # Get Data with next Tick
+#  $rc = $self->_recv();
+##  if (!$@) {
+#  if (defined($rc)) {
+#    $rc = decode_json($rc);
+#    Trace->Trc('I', 1, 0x03200, $args{typ} . '|' . $args{account} . ' ' . $args{wert}, $rc);
+#  } else {
+#    Trace->Trc('I', 1, 0x0b200, $args{typ} . '|' . $args{account} . ' ' . $args{wert});
+#  }  
+#
+#  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
+#  $self->{subroutine} = $merker;
+#
+#  return $rc;
+#}
 
-  #my $merker          = $self->{subroutine};
-  #$self->{subroutine} = (caller(0))[3];
-  #Trace->Trc('S', 2, 0x00001, $self->{subroutine}, join(' ', %args));
-  
-  my $rc = $self->_bindSocket();
 
-  if ($rc) {
-    eval {$rc = $self->{PubSock}->send($cmd, ZMQ_DONTWAIT)};
-    if ($@) {
-      # Fehler
-      $rc = 0;
-      Trace->Trc('I', 1, 0x0b800, $self->{PubAddr}, join(' ', $@));
-    } else {
-      # Alles ok
-      $rc = 1;
-      Trace->Trc('I', 1, 0x03800, $self->{PubAddr}, join(' ', $@));
-    }
-  }
-  
-  #Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
-  #$self->{subroutine} = $merker;
+#sub _send {
+#  #################################################################
+#  #     An PubSocket binden
+#  #     Proc 8
+#  #     Eingabe: $1: Kommando
+#  #              $2: Flags
+#  #     Ausgabe: O: Socket nicht binded
+#  #              1: Socket binded
+#  #
+#  my $self = shift;
+#  my $cmd  = shift;
+#
+#  #my $merker          = $self->{subroutine};
+#  #$self->{subroutine} = (caller(0))[3];
+#  #Trace->Trc('S', 2, 0x00001, $self->{subroutine}, join(' ', %args));
+#  
+#  my $rc = $self->_bindSocket('Socket', 'PubSock', 'Addr', 'PubAddr');
+#
+#  if ($rc) {
+#    eval {$rc = $self->{PubSock}->send($cmd, ZMQ_DONTWAIT)};
+#    if ($@) {
+#      # Fehler
+#      $rc = 0;
+#      Trace->Trc('I', 1, 0x0b800, $self->{PubAddr}, join(' ', $@));
+#    } else {
+#      # Alles ok
+#      $rc = 1;
+#      Trace->Trc('I', 1, 0x03800, $self->{PubAddr}, join(' ', $@));
+#    }
+#  }
+#  
+#  #Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
+#  #$self->{subroutine} = $merker;
+#
+#  return $rc;
+#}
 
-  return $rc;
-}
 
-
+#sub _recv {
+#  #################################################################
+#  #     SubSocket connecten
+#  #     Proc 6
+#  #     Eingabe: $1: Flags
+#  #     Ausgabe: O: Socket nicht connected
+#  #              1: Socket connected
+#  #
+#  my $self = shift;
+#  my %args = (@_);
+#
+#  #my $merker          = $self->{subroutine};
+#  #$self->{subroutine} = (caller(0))[3];
+#  #Trace->Trc('S', 2, 0x00001, $self->{subroutine}, join(' ', %args));
+#
+#  my $rc = $self->_bindSocket('Socket', 'RepSock', 'Addr', 'RepAddr');
+#
+#  if ($rc) {
+#    eval {$rc = $self->{RepSock}->recv(ZMQ_DONTWAIT)};
+#    if ($@) {
+#      # Fehler
+#      $rc = undef;
+#      Trace->Trc('I', 3, 0x0b600, $self->{RepAddr}, join(' ', $@));
+#    } else {
+#      # Alles ok
+#      Trace->Trc('I', 2, 0x03600, $self->{RepAddr}, join(' ', $@));
+#    }
+#  }
+#  
+#  #Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
+#  #$self->{subroutine} = $merker;
+#
+#  return $rc;
+#}
 
 
 1;

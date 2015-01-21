@@ -7,17 +7,9 @@ package FXASSIST;
 #
 # Aufgabe:		- Ausfuehrbarer Code von fxassist.pl
 #
-# Done Implentierung cronaehnlicher Aktivitaetssteuerung (Schedule::Cron?)
 # ToDo Storables zun Laufen bringen falls moeglich
-# ToDo Ggf. LWP::RobotUA einsetzen
 # ToDo ZMQ::LibZMQ2 Fehler cpanm install fixen Alternativ: LibZMQ3 oder LibZMQ4 Library fuer MT4
 # ToDo ZeroMQ Telegramme definieren und auf beiden Seiten (Perl und MT4) implementieren
-# ToDo Nach Abbruch der Internetverbindung: Use of uninitialized value in pattern match (m//) at /Users/pgk/Documents/00_Eclipse/FxAssist/lib/FXASSIST.pm line 431.
-#      if (defined($self->{Response}) &&
-#          $self->{Response}->is_success() &&
-#          $self->{Response}->header('title') =~ /$self->{Location}->{Login}->{Title}/ &&
-#          $self->{Response}->content() =~ m/form[^>]*name="$self->{Location}->{Login}->{Form}->{Name}"/ &&
-#          $self->{Response}->content() =~ m/form[^>]*action="([^"]*)"/) {
 # ToDo Ergebnis des ZMQ Transfers ermitteln (kein Returncode verfuegbar) 
 #
 # $Id: $
@@ -196,12 +188,8 @@ sub _init {
   # Initialisierung UUID Objekt
   $self->{UUID} = Data::UUID->new();
   
-  # Anlegen der ZMQ Verbindung
-  $self->{ZMQ} = MQL4_ZMQ->new('PubAddr' => $cfg{ZMQ}{PubAddr} || '5555',
-                               'RepAddr' => $cfg{ZMQ}{RepAddr} || '5556');
-
   # Einlesen aller konfigurierten Kontoverbindungen
-  # Nicht mehr noetig, wird in syncAccount erledigt
+  # Nicht mehr noetig, wird in ZMQ_syncAccount erledigt
 #  foreach my $section (keys %cfg) {
 #    next unless $section =~ /^Account (.*)$/;
 #    my $account = $1;
@@ -221,9 +209,6 @@ sub _init {
 #    }
 #  }
    
-  # Mit dem RobotUA wird das Warten automatisiert; leider kommen wir damit nicht rein
-  # $self->{Browser} = LWP::RobotUA->new('Me/1.0', 'a@b.c');
-  # $self->{Browser}->delay(60/60);  # avoid polling more often than every 1 minute
   $self->{Browser} = LWP::UserAgent->new( );
   $self->{Browser}->env_proxy();   # if we're behind a firewall
   
@@ -238,34 +223,39 @@ sub _init {
     }
   }
 
-  # Falls ein Aktivitaetszeitraum konfiguriert ist wird er gesetzt
-  $self->{Cron}          = $cfg{Prg}{Aktiv} | '* * * * * 0-59/5';
-  $self->{NextExecution} = Schedule::Cron->get_next_execution_time($self->{Cron});
-  
-  # URL-Zugriff, Form- und Datenfelder definieren
-  if (!defined($self->{Location})) {
-    foreach my $section (keys %cfg) {
-      next unless $section =~ /^Location (.*)$/;
-      my $location = $1;
-      while ((my $key, my $value) = each(%{$cfg{$section}})) {
-        (my $key1, my $value1) = split(' ', $key);
-        if (defined($value1)) {
-          $self->{Location}->{$location}->{$key1}->{$value1} = Utils::extendString($value);
-        } else {
-          $self->{Location}->{$location}->{$key} = Utils::extendString($value);
-        }
-      }
+  # Ablegen aller Sources und Targets
+  foreach my $section (keys %cfg) {
+    next unless ($section =~ /^Source|Target/);
+    my ($InOut, $type, $specifier, $location) = split(' ', $section);
+    $location ||= 'DEFAULT';
+    # URL-Zugriff, Form- und Datenfelder definieren
+    # Mail-Zugriff, account und Password definieren
+    if ($InOut eq 'Source') {
+      $self->{$InOut}->{$type}->{$specifier}->{$location}                  = $cfg{$section};
+      $self->{$InOut}->{$type}->{$specifier}->{$location}->{Aktiv}        |= '* * * * * 0-59/5';
+      $self->{$InOut}->{$type}->{$specifier}->{$location}->{NextExecution} = 0;
+      $self->{$InOut}->{$type}->{$specifier}->{Last}                       = '';
+      $self->{$InOut}->{$type}->{$specifier}->{Next}                       = 'Login';
+      $self->{$InOut}->{$type}->{$specifier}->{Delay}                      = 0;
+      $self->{$InOut}->{$type}->{$specifier}->{Lazyfaktor}                 = $cfg{Prg}{Lazyfaktor} || 10;
     }
-    $self->{Location}->{Last}       = '';
-    $self->{Location}->{Next}       = 'Login';
-    $self->{Location}->{Delay}      = 0;
-    $self->{Location}->{Lazyfaktor} = $cfg{Prg}{Lazyfaktor} || 10;
+    if ($InOut eq 'Target') {
+      $self->{$InOut}->{$type} = $cfg{$section};
+      $self->{$InOut}->{$type}->{Option} = $specifier if defined($specifier);
+    }
+  }
+
+  Trace->Exit(1, 0, 0x08002, 'Source') if (!defined($self->{Source}));
+  Trace->Exit(1, 0, 0x08002, 'Target') if (!defined($self->{Target}));
+  
+  if (defined($self->{Target}->{ZMQ}->{PubAddr}) && defined($self->{Target}->{ZMQ}->{RepAddr})) {
+    # Anlegen der ZMQ Verbindung
+    $self->{ZMQ} = MQL4_ZMQ->new('PubAddr' => $self->{Target}->{ZMQ}->{PubAddr} || '5555',
+                                 'RepAddr' => $self->{Target}->{ZMQ}->{RepAddr} || '5556');
   }
   
   $self->{SignalAktuell}->{ID}   = 0;
   $self->{SignalAktuell}->{UUID} = 0;
-
-  Trace->Exit(1, 0, 0x08002, 'Location') if (!defined($self->{Location}));
 }
 
 
@@ -293,7 +283,136 @@ sub DESTROY {
 }
 
 
-sub EAKommunikation {
+sub putSignals {
+  #################################################################
+  #     Signalverteiler
+  #     Proc 5
+  #
+  my $self = shift;
+
+  my $merker          = $self->{subroutine};
+  $self->{subroutine} = (caller(0))[3];
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine});
+  
+  my $rc = 0;
+  
+  $self->ZMQ_Kommunikation();
+  $self->Push_Kommunikation('Typ',   'Prowl',
+                            'Agent', 'ProwlScript/1.2',
+                            'URL',   'https://prowlapp.com/publicapi/add');
+  $self->Push_Kommunikation('Typ',   'NMA',
+                            'Agent', 'NMAScript/1.0',
+                            'URL',   'https://www.notifymyandroid.com/publicapi/notify');
+  $self->FS_Kommunikation();
+  $self->DB_Kommunikation();
+  
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
+  $self->{subroutine} = $merker;
+
+  return $rc;
+}
+
+
+sub Push_Kommunikation {
+  #################################################################
+  #     Signalverteilung Prowl
+  #     Proc 5
+  #
+  my $self = shift;
+  my %args = (@_);
+
+  my $merker          = $self->{subroutine};
+  $self->{subroutine} = (caller(0))[3];
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine});
+  
+  my $rc = 0;
+  
+  my %options;
+  $options{'application'}  = "FxAssist";
+  $options{'event'}        = "Signal";
+  $options{'notification'} = "Signaldetails";
+  
+  # URL encode our arguments
+  $options{'application'} =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
+  $options{'event'} =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
+  $options{'notification'} =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
+
+  # Generate our HTTP request.
+  my ($userAgent, $request, $response, $requestURL);
+  $userAgent = LWP::UserAgent->new;
+  $userAgent->agent($args{'Agent'});
+  $userAgent->env_proxy();
+
+  my %cfg = Configuration->config($args{'Typ'});
+  foreach my $key (keys(%cfg)) {
+    $requestURL = sprintf($cfg{'URL'} . "?apikey=%s&application=%s&event=%s&description=%s&priority=%d",
+                          $cfg{$key},
+                          $options{'application'},
+                          $options{'event'},
+                          $options{'notification'},
+                          $options{'priority'});
+
+    $request = HTTP::Request->new(GET => $requestURL);
+
+    $response = $userAgent->request($request);
+
+    if ($response->is_success) {
+      print "Notification successfully posted.\n";
+    } elsif ($response->code == 401) {
+      print STDERR "Notification not posted: incorrect API key.\n";
+    } else {
+      print STDERR "Notification not posted: " . $response->content . "\n";
+    }
+  }
+  
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
+  $self->{subroutine} = $merker;
+
+  return $rc;
+}
+
+
+sub FS_Kommunikation {
+  #################################################################
+  #     Signalverteilung Filesystem
+  #     Proc 5
+  #
+  my $self = shift;
+
+  my $merker          = $self->{subroutine};
+  $self->{subroutine} = (caller(0))[3];
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine});
+  
+  my $rc = 0;
+  
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
+  $self->{subroutine} = $merker;
+
+  return $rc;
+}
+
+
+sub DB_Kommunikation {
+  #################################################################
+  #     Signalverteilung Datenbank
+  #     Proc 5
+  #
+  my $self = shift;
+
+  my $merker          = $self->{subroutine};
+  $self->{subroutine} = (caller(0))[3];
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine});
+  
+  my $rc = 0;
+  
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
+  $self->{subroutine} = $merker;
+
+  return $rc;
+}
+
+
+sub ZMQ_Kommunikation {
   #################################################################
   #     Procedure zur Uebergabe von Kommandos und Abholen des 
   #     Status von den angemeldeten EAs
@@ -309,7 +428,7 @@ sub EAKommunikation {
   
   # Einlesen von der Schnittstelle und Auswerten der gelesenen Signale
   # Falls es einen Grund gibt, warum wir nochmal einlesen sollten, merken wir uns das
-  my $do_EA_IO = $self->readMessage(0);
+  my $do_EA_IO = $self->ZMQ_readMessage(0);
 
   # Ausfuehren der EA-IO
   # Ein Signal hat 2 Flags. In Abhaengigkeit von diesen sind  
@@ -327,7 +446,7 @@ sub EAKommunikation {
       # Abarbeitung aller bestehenden Signale
       if (defined($self->{Signal}->{$uuid})) {
         $self->doDebugSignal($uuid) if Trace->debugLevel() > 3;
-        $do_EA_IO ||= $self->processSignal($uuid);
+        $do_EA_IO ||= $self->ZMQ_processSignal($uuid);
       }
     }
     
@@ -350,7 +469,7 @@ sub EAKommunikation {
 }
 
 
-sub readMessage {
+sub ZMQ_readMessage {
   #################################################################
   #     Procedure zum Einlesen der EA Response
   my $self = shift;
@@ -395,17 +514,17 @@ sub readMessage {
         }
       } elsif ($msgtype eq 'bridge') {
         if ($status eq 'up') {
-          $self->syncAccount('Account', $account, 
-                             'Status',  1);
+          $self->ZMQ_syncAccount('Account', $account, 
+                                 'Status',  1);
           $rc = 1;
         }
         if ($status eq 'down') {
           delete($self->{Account}->{$account})
         }
       } elsif ($msgtype eq 'orders') {
-        $self->syncAccount('Account', $account, 
-                           'Status',  2,
-                           'Info',    $msg->{order});
+        $self->ZMQ_syncAccount('Account', $account, 
+                               'Status',  2,
+                               'Info',    $msg->{order});
       } elsif ($msgtype eq 'account') {
       } elsif ($msgtype eq 'tick') {
       } elsif ($msgtype eq 'ema') {
@@ -417,7 +536,7 @@ sub readMessage {
 }
 
  
-sub syncAccount {
+sub ZMQ_syncAccount {
   #################################################################
   #     Ein neuer Account ist aufgetaucht oder ein bekannter muß
   #     neu synchronisiert werden.
@@ -426,7 +545,7 @@ sub syncAccount {
   #     und legt die interne Datenstruktur neu an
   #     Accounts werden nur akzeptiert, wenn sie in der INI-Datei
   #     konfiguriert sind.
-  #     Einbindung mit if ($self->{Account}->{$args{Account}}{Status} < 3) {syncAccount}
+  #     Einbindung mit if ($self->{Account}->{$args{Account}}{Status} < 3) {ZMQ_syncAccount}
   #     Proc 9
   #     Eingabe: Account -> Accountnummer
   #              Status  -> Account Status: 0 : neu
@@ -539,7 +658,7 @@ sub syncAccount {
 }
 
 
-sub processSignal {
+sub ZMQ_processSignal {
   #################################################################
   #     Procedure zum Einlesen der EA Response
   my $self = shift;
@@ -599,7 +718,61 @@ sub processSignal {
  
 sub getSignals {
   #################################################################
-  #     Dauerlaufroutine
+  #     Signalsammler
+  #     Proc 5
+  #
+  my $self = shift;
+
+  my $merker          = $self->{subroutine};
+  $self->{subroutine} = (caller(0))[3];
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine});
+  
+  my $rc = 0;
+  
+  $self->web_Read();
+  $self->mail_Read();
+  
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
+  $self->{subroutine} = $merker;
+
+  return $rc;
+}
+
+
+sub mail_Read {
+  #################################################################
+  #     Signalsammler
+  #     Proc 5
+  #
+  my $self = shift;
+
+  my $merker          = $self->{subroutine};
+  $self->{subroutine} = (caller(0))[3];
+  Trace->Trc('S', 2, 0x00001, $self->{subroutine});
+  
+  my $rc = 0;
+
+  if (defined($self->{Source}->{Mail})) {
+    foreach my $provider (keys(%{$self->{Source}->{Mail}})) {
+      my $phase = $self->{Source}->{Mail}->{$provider}->{Next};
+      my $cron  = $self->{Source}->{Mail}->{$provider}->{$phase}->{Aktiv};
+      if ($self->{Source}->{Mail}->{$provider}->{$phase}->{NextExecution} < time) {
+        $self->{Source}->{Mail}->{$provider}->{$phase}->{NextExecution} = Schedule::Cron->get_next_execution_time($cron) || 0;
+        # Login to Mail Áccount and fetch new Mails
+      }
+    }
+  }
+  
+  Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
+  $self->{subroutine} = $merker;
+
+  return $rc;
+}
+
+
+sub web_Read {
+  #################################################################
+  #     Signalsammler
   #     Proc 5
   #
   my $self = shift;
@@ -613,25 +786,26 @@ sub getSignals {
   # Falls ein Aktivitaetszeitraum gesetzt ist und wir uns nicht innerhalb befinden
   # machen wir nichts und verlassen die Routinw wieder um mit der EA-Kommunikation
   # weiter zu machen
-  if ($self->{NextExecution} < time) {
-    $self->{NextExecution} = Schedule::Cron->get_next_execution_time($self->{Cron});
-    if (Configuration->config('Prg', 'Fake')) {
-      if (!defined($self->{SignalAktuell}->{UUID})) {
-        $self->{SignalAktuell}->{UUID}  = $self->{UUID}->create_str();
-        $self->{SignalAktuell}->{ID}    = '1234';
-        $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{Valid}  = 1;
-        $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{Activ}  = 0;
-        $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{ID}     = '1497';
-        $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{Signal} = 'DAX Short';
-        $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{Stand}  = '9427';
-        $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{Zeit}   = '20.11.2014 – 09:45 Uhr';
-        $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{SL}     = '9455';
-        $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{TP}     = '9399';
+  if (Configuration->config('Prg', 'Fake')) {
+    if (!defined($self->{SignalAktuell}->{UUID})) {
+      $self->{SignalAktuell}->{UUID}  = $self->{UUID}->create_str();
+      $self->{SignalAktuell}->{ID}    = '1234';
+      $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{Valid}  = 1;
+      $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{Activ}  = 0;
+      $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{ID}     = '1497';
+      $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{Signal} = 'DAX Short';
+      $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{Stand}  = '9427';
+      $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{Zeit}   = '20.11.2014 – 09:45 Uhr';
+      $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{SL}     = '9455';
+      $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{TP}     = '9399';
+    }
+  } else {
+    if (defined($self->{Source}->{Web})) {
+      foreach my $provider (keys(%{$self->{Source}->{Web}})) {
+        if ($self->{Source}->{Web}->{$provider}->{Next} eq 'Login')  {$self->web_doLogin($provider)}
+        if ($self->{Source}->{Web}->{$provider}->{Next} eq 'GetIn')  {$self->web_doGetIn($provider)}
+        if ($self->{Source}->{Web}->{$provider}->{Next} eq 'GetOut') {$self->web_doGetOut($provider)}
       }
-    } else {
-      if ($self->{Location}->{Next} eq 'Login')  {$self->doLogin()}
-      if ($self->{Location}->{Next} eq 'GetIn')  {$self->doGetIn()}
-      if ($self->{Location}->{Next} eq 'GetOut') {$self->doGetOut()}
     }
   }
   
@@ -642,11 +816,12 @@ sub getSignals {
 }
 
 
-sub doLogin {
+sub web_doLogin {
   #################################################################
   #     Einloggen
   #     Proc 6
   my $self = shift;
+  my $provider = shift;
 
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
@@ -654,45 +829,50 @@ sub doLogin {
 
   my $rc = 0;
 
-  # Holen der Login-Seite
-  Trace->Trc('I', 1, 0x02600);
-  $self->myGet('Login');
-  $self->{Location}->{Last} = 'Login';
+  my $phase = $self->{Source}->{Web}->{$provider}->{Next};
+  my $cron  = $self->{Source}->{Web}->{$provider}->{$phase}->{Aktiv};
+  if ($self->{Source}->{Web}->{$provider}->{$phase}->{NextExecution} < time) {
+    $self->{Source}->{Web}->{$provider}->{$phase}->{NextExecution} = Schedule::Cron->get_next_execution_time($cron) || 0;
+    # Holen der Login-Seite
+    Trace->Trc('I', 1, 0x02600);
+    $self->myGet('Login', $provider);
+    $self->{Source}->{Web}->{$provider}->{Last} = 'Login';
 
-  # Auswerten des Response und bei Erfolg Einloggen (Form ausfuellen und abschicken)
-  if (defined($self->{Response}) &&
-      $self->{Response}->is_success() &&
-      $self->{Response}->header('title') =~ /$self->{Location}->{Login}->{Title}/ &&
-      $self->{Response}->content() =~ m/form[^>]*name="$self->{Location}->{Login}->{Form}->{Name}"/ &&
-      $self->{Response}->content() =~ m/form[^>]*action="([^"]*)"/) {
-    my $action = $1;
-    Trace->Trc('I', 4, 0x02601, $self->{Response}->status_line());
-    my %formvalues;
-    while ((my $key, my $value) = each(%{$self->{Location}->{Login}->{Form}})) {
-      next if ($key eq "Name");
-      $formvalues{$key} = Utils::extendString($value, , "URL|$self->{Location}->{Login}->{URL}");
-    }
-    # Einloggen
-#   $self->myPost($action, [%formvalues]);
-#   my $resp = $self->{Browser}->post($action, [%formvalues]);
-#   $self->{Response} = $resp;
-    $self->{Response} = $self->{Browser}->post($action, [%formvalues]);
-    # Ggf. Redirection folgen
-    while ($self->{Response}->is_redirect) {
-      $self->{Response} = $self->{Browser}->get($self->{Response}->header('location'));
-    }
-    $self->doDebugResponse($action, [%formvalues]) if Trace->debugLevel() > 3;
+    # Auswerten des Response und bei Erfolg Einloggen (Form ausfuellen und abschicken)
+    if (defined($self->{Response}) &&
+        $self->{Response}->is_success() &&
+        $self->{Response}->header('title') =~ /$self->{Source}->{Web}->{$provider}->{Login}->{Title}/ &&
+        $self->{Response}->content() =~ m/form[^>]*name="$self->{Source}->{Web}->{$provider}->{Login}->{Form}->{Name}"/ &&
+        $self->{Response}->content() =~ m/form[^>]*action="([^"]*)"/) {
+      my $action = $1;
+      Trace->Trc('I', 4, 0x02601, $self->{Response}->status_line());
+      my %formvalues;
+      while ((my $key, my $value) = each(%{$self->{Source}->{Web}->{$provider}->{Login}->{Form}})) {
+        next if ($key eq "Name");
+        $formvalues{$key} = Utils::extendString($value, , "URL|$self->{Source}->{Web}->{$provider}->{Login}->{URL}");
+      }
+      # Einloggen
+#     $self->myPost($action, [%formvalues]);
+#     my $resp = $self->{Browser}->post($action, [%formvalues]);
+#     $self->{Response} = $resp;
+      $self->{Response} = $self->{Browser}->post($action, [%formvalues]);
+      # Ggf. Redirection folgen
+      while ($self->{Response}->is_redirect) {
+        $self->{Response} = $self->{Browser}->get($self->{Response}->header('location'));
+      }
+      $self->doDebugResponse($action, $provider, [%formvalues]) if Trace->debugLevel() > 3;
     
-    # Auswerten den Einlog Responses und bei Erfolg Weiterschalten der Location auf GetIn
-    if ($self->{Response}->is_success &&
-       ($self->{Response}->header('title') =~ /$self->{Location}->{$self->{Location}->{Login}->{Next}}->{Title}/)) {
-      Trace->Trc('I', 1, 0x02602, $self->{Response}->status_line(), $self->{Location}->{Login}->{Next});
-      $self->{Location}->{Next} = $self->{Location}->{Login}->{Next};
-      $rc = 1;    
-    }
-  } else {
-    if (defined($self->{Response}) && !$self->{Response}->is_success()) {
-      Trace->Trc('I', 1, 0x0a600, $self->{Response}->status_line(), 'Login'); 
+      # Auswerten den Einlog Responses und bei Erfolg Weiterschalten der Location auf GetIn
+      if ($self->{Response}->is_success &&
+         ($self->{Response}->header('title') =~ /$self->{Source}->{Web}->{$provider}->{$self->{Source}->{Web}->{$provider}->{Login}->{Next}}->{Title}/)) {
+        Trace->Trc('I', 1, 0x02602, $self->{Response}->status_line(), $self->{Source}->{Web}->{$provider}->{Login}->{Next});
+        $self->{Source}->{Web}->{$provider}->{Next} = $self->{Source}->{Web}->{$provider}->{Login}->{Next};
+        $rc = 1;    
+      }
+    } else {
+      if (defined($self->{Response}) && !$self->{Response}->is_success()) {
+        Trace->Trc('I', 1, 0x0a600, $self->{Response}->status_line(), 'Login'); 
+      }
     }
   }
 
@@ -711,37 +891,38 @@ sub myGet {
   #  and then, optionally, any header lines: (key,value, key,value)
   my $self = shift;
   my $type = shift;
+  my $provider = shift;
 
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
   Trace->Trc('S', 3, 0x00001, $self->{subroutine}, $type);
 
   my $url = $type;
-  if (defined($self->{Location}->{$type})) {
+  if (defined($self->{Source}->{Web}->{$provider}->{$type})) {
     # Delay noetig, falls kein Redirect oder Statusabfrage
-    $url = $self->{Location}->{$type}->{URL};
-    my $delay = $self->{Location}->{$type}->{Delay} || 60;
+    $url = $self->{Source}->{Web}->{$provider}->{$type}->{URL};
+    my $delay = $self->{Source}->{Web}->{$provider}->{$type}->{Delay} || 60;
     if (defined($self->{Signal}) && 
         defined($self->{SignalAktuell}) &&
         defined($self->{SignalAktuell}->{UUID}) &&
         defined($self->{Signal}->{$self->{SignalAktuell}->{UUID}}) &&
         $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{Valid}) {
       # Falls das Signal noch gueltig ist werden wir lazy
-      $delay = 10 * $self->{Location}->{Lazyfaktor};
+      $delay = 10 * $self->{Source}->{Web}->{$provider}->{Lazyfaktor};
     }
-    while (time() - $self->{Location}->{Delay} < $delay) {
-      Trace->Trc('I', 4, 0x02300, time() - $self->{Location}->{Delay}, $delay);
-      sleep $delay - (time() - $self->{Location}->{Delay});
+    while (time() - $self->{Source}->{Web}->{$provider}->{Delay} < $delay) {
+      Trace->Trc('I', 4, 0x02300, time() - $self->{Source}->{Web}->{$provider}->{Delay}, $delay);
+      sleep $delay - (time() - $self->{Source}->{Web}->{$provider}->{Delay});
     }
-    Trace->Trc('I', 4, 0x02301, time() - $self->{Location}->{Delay}, $delay);
-    $self->{Location}->{Delay} = time();
+    Trace->Trc('I', 4, 0x02301, time() - $self->{Source}->{Web}->{$provider}->{Delay}, $delay);
+    $self->{Source}->{Web}->{$provider}->{Delay} = time();
   }
   $self->{Response} = $self->{Browser}->get($url, @_);
   # Ggf. Redirection folgen
   while ($self->{Response}->is_redirect) {
     $self->{Response} = $self->{Browser}->get($self->{Response}->header('location'));
   }
-  $self->doDebugResponse($url, @_) if Trace->debugLevel() > 3;
+  $self->doDebugResponse($url, $provider, @_) if Trace->debugLevel() > 3;
   
   Trace->Trc('S', 3, 0x00002, $self->{subroutine});
   $self->{subroutine} = $merker;
@@ -752,11 +933,12 @@ sub myGet {
 }
 
 
-sub doGetIn {
+sub web_doGetIn {
   #################################################################
   #     Datenabruf
   #     Proc 7
   my $self = shift;
+  my $provider = shift;
 
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
@@ -764,66 +946,71 @@ sub doGetIn {
   
   my $rc = 0;
 
-  # Ermitteln des aktuellen Wertes
-  if ($self->{Location}->{Last} eq 'Login') {
-    # Seite wurde bereits im Rahmen des Login geholt, daher kein erneutes Laden,
-    # falls wir von der Location Login kommen
-    Trace->Trc('I', 4, 0x02700, $self->{Location}->{Last} || 'Neustart', 'GetIn');
-    $self->{Location}->{Last} = 'GetIn';
-  } else {
-    Trace->Trc('I', 2, 0x02701);
-    $self->myGet('GetIn');
-  }
+  my $phase = $self->{Source}->{Web}->{$provider}->{Next};
+  my $cron  = $self->{Source}->{Web}->{$provider}->{$phase}->{Aktiv};
+  if ($self->{Source}->{Web}->{$provider}->{$phase}->{NextExecution} < time) {
+    $self->{Source}->{Web}->{$provider}->{$phase}->{NextExecution} = Schedule::Cron->get_next_execution_time($cron) || 0;
+    # Ermitteln des aktuellen Wertes
+    if ($self->{Source}->{Web}->{$provider}->{Last} eq 'Login') {
+      # Seite wurde bereits im Rahmen des Login geholt, daher kein erneutes Laden,
+      # falls wir von der Location Login kommen
+      Trace->Trc('I', 4, 0x02700, $self->{Source}->{Web}->{$provider}->{Last} || 'Neustart', 'GetIn');
+      $self->{Source}->{Web}->{$provider}->{Last} = 'GetIn';
+    } else {
+      Trace->Trc('I', 2, 0x02701);
+      $self->myGet('GetIn', $provider);
+    }
 
-  # Holen der Seite erfolgreich ?  
-  if (defined($self->{Response}) &&
-      $self->{Response}->is_success && 
-      $self->{Response}->header('title') =~ /$self->{Location}->{GetIn}->{Title}/) {
-    Trace->Trc('I', 1, 0x02702, $self->{Response}->status_line(), 'GetIn');
+    # Holen der Seite erfolgreich ?  
+    if (defined($self->{Response}) &&
+        $self->{Response}->is_success && 
+        $self->{Response}->header('title') =~ /$self->{Source}->{Web}->{$provider}->{GetIn}->{Title}/) {
+      Trace->Trc('I', 1, 0x02702, $self->{Response}->status_line(), 'GetIn');
  
-    # Auswertung der Daten
-    my %signal;
-    my $content = $self->{Response}->decoded_content();
-    open IN, '<', \$content or die $!;
-    while (<IN>) {
-      my $line = $_;
-      while ((my $key, my $value) = each(%{$self->{Location}->{GetIn}->{Field}})) {
-        if ($line =~ /$value/) {
-          $signal{$key} = decode_entities($1);
-          $signal{$key} =~ s/([^[:ascii:]]+)/unidecode($1)/ge;
-        };
+      # Auswertung der Daten
+      my %signal;
+      my $content = $self->{Response}->decoded_content();
+      open IN, '<', \$content or die $!;
+      while (<IN>) {
+        my $line = $_;
+        while ((my $key, my $value) = each(%{$self->{Source}->{Web}->{$provider}->{GetIn}->{Field}})) {
+          if ($line =~ /$value/) {
+            $signal{$key} = decode_entities($1);
+            $signal{$key} =~ s/([^[:ascii:]]+)/unidecode($1)/ge;
+          }
+        }
       }
-    }
-    close(IN);
+      close(IN);
 
-    if (defined($signal{ID}) && $signal{ID} && 
-        ($self->{SignalAktuell}->{ID} ne $signal{ID})) {
-      # Neues Signal
-      $signal{UUID} = $self->{UUID}->create_str();
-      Trace->Trc('I', 1, 0x02703, $signal{ID}, $signal{UUID});
-      undef($self->{Signal}->{$signal{UUID}});
-      # Neues Signal vorhanden. Altes Signal ist damit ungueltig
-      if ($self->{SignalAktuell}->{UUID}) {
-        $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{Valid} = 0;
+      if (defined($signal{ID}) && $signal{ID} && 
+          ($self->{SignalAktuell}->{ID} ne $signal{ID})) {
+        # Neues Signal
+        $signal{UUID} = $self->{UUID}->create_str();
+        Trace->Trc('I', 1, 0x02703, $signal{ID}, $signal{UUID});
+        undef($self->{Signal}->{$signal{UUID}});
+        # Neues Signal vorhanden. Altes Signal ist damit ungueltig
+        if ($self->{SignalAktuell}->{UUID}) {
+          $self->{Signal}->{$self->{SignalAktuell}->{UUID}}->{Valid} = 0;
+        }
+        $self->{SignalAktuell}->{UUID} = $signal{UUID};
+        $self->{SignalAktuell}->{ID}   = $signal{ID};
+        $self->{Signal}->{$signal{UUID}}->{Valid} = 1;
+        $self->{Signal}->{$signal{UUID}}->{Activ} = 0;
+        while ((my $key, my $value) = each %signal) {$self->{Signal}->{$signal{UUID}}->{$key} = $value}  
       }
-      $self->{SignalAktuell}->{UUID} = $signal{UUID};
-      $self->{SignalAktuell}->{ID}   = $signal{ID};
-      $self->{Signal}->{$signal{UUID}}->{Valid} = 1;
-      $self->{Signal}->{$signal{UUID}}->{Activ} = 0;
-      while ((my $key, my $value) = each %signal) {$self->{Signal}->{$signal{UUID}}->{$key} = $value}  
-    }
-    $self->doDebugSignal($signal{ID}) if Trace->debugLevel() > 3;
+      $self->doDebugSignal($signal{ID}) if Trace->debugLevel() > 3;
     
-    if (defined($self->{Signal}->{$signal{UUID}})) {
-      # Holen des Signals erfolgreich: Weiter mit Checken der Historienseite
-      $self->{Location}->{Next} = 'GetOut';
+      if (defined($self->{Signal}->{$signal{UUID}})) {
+        # Holen des Signals erfolgreich: Weiter mit Checken der Historienseite
+        $self->{Source}->{Web}->{$provider}->{Next} = 'GetOut';
+      }
+    } else {
+      # Holen der Werte nicht erfolgreich: Weiterschalten mit Login
+      if (defined($self->{Response}) && !$self->{Response}->is_success()) {
+        Trace->Trc('I', 1, 0x0a700, $self->{Response}->status_line(), 'Login'); 
+      }
+      $self->{Source}->{Web}->{$provider}->{Next} = 'Login';
     }
-  } else {
-    # Holen der Werte nicht erfolgreich: Weiterschalten mit Login
-    if (defined($self->{Response}) && !$self->{Response}->is_success()) {
-      Trace->Trc('I', 1, 0x0a700, $self->{Response}->status_line(), 'Login'); 
-    }
-    $self->{Location}->{Next} = 'Login';
   }
 
   Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
@@ -833,7 +1020,7 @@ sub doGetIn {
 }
 
 
-sub doGetOut {
+sub web_doGetOut {
   #################################################################
   #     Datenabruf
   #     Proc 8
@@ -841,8 +1028,9 @@ sub doGetOut {
   # Dies muß dann unmittelbar nachgeholt werden.
   # Der Ausstieg ist erreicht falls
   #   - diese Seite existiert oder
-  #   - die aktuelle Signal-ID höher ist als unsere (wird in doGetIn entschieden)
+  #   - die aktuelle Signal-ID höher ist als unsere (wird in web_doGetIn entschieden)
   my $self = shift;
+  my $provider = shift;
 
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
@@ -850,34 +1038,39 @@ sub doGetOut {
   
   my $rc = 0;
 
-  $self->{Location}->{Last} = 'GetOut';
+  my $phase = $self->{Source}->{Web}->{$provider}->{Next};
+  my $cron  = $self->{Source}->{Web}->{$provider}->{$phase}->{Aktiv};
+  if ($self->{Source}->{Web}->{$provider}->{$phase}->{NextExecution} < time) {
+    $self->{Source}->{Web}->{$provider}->{$phase}->{NextExecution} = Schedule::Cron->get_next_execution_time($cron) || 0;
+    $self->{Source}->{Web}->{$provider}->{Last} = 'GetOut';
   
-  if (defined($self->{Signal})) {
-    foreach my $uuid (keys(%{$self->{Signal}})) {
-      if (defined($self->{Signal}->{$uuid}) && (ref($self->{Signal}->{$uuid}) eq 'HASH')) {      
-        $self->doDebugSignal($uuid) if Trace->debugLevel() > 3;
-        next unless ($self->{Signal}->{$uuid}->{Valid});
-        my $zeit = $self->{Signal}->{$uuid}->{Zeit};
-        if ($zeit =~ /([0-9]{2})\.([0-9]{2})\.([0-9]{4})/) {
-          my ($d, $m, $j) = ($1, $2, $3);
-          my $id = $self->{Signal}->{$uuid}->{ID};
-          my $url = Utils::extendString($self->{Location}->{GetOut}->{URL}, "UUID|$uuid|ID|$id|DAY|$d|MONTH|$m|YEAR|$j");
-          Trace->Trc('I', 2, 0x02800, $self->{Signal}->{$uuid}->{ID}, $uuid);
-          $self->myGet($url);
-          if (defined($self->{Response})) {
-            Trace->Trc('I', 1, 0x02801, $self->{Response}->status_line(), $uuid);
-            # Historieneintrag vorhanden. Signal ist damit ungueltig
-            $self->{Signal}->{$uuid}->{Valid} = 0;
-          } else {
-            Trace->Trc('I', 4, 0x02802, $self->{Response}->status_line(), $uuid);
+    if (defined($self->{Signal})) {
+      foreach my $uuid (keys(%{$self->{Signal}})) {
+        if (defined($self->{Signal}->{$uuid}) && (ref($self->{Signal}->{$uuid}) eq 'HASH')) {      
+          $self->doDebugSignal($uuid) if Trace->debugLevel() > 3;
+          next unless ($self->{Signal}->{$uuid}->{Valid});
+          my $zeit = $self->{Signal}->{$uuid}->{Zeit};
+          if ($zeit =~ /([0-9]{2})\.([0-9]{2})\.([0-9]{4})/) {
+            my ($d, $m, $j) = ($1, $2, $3);
+            my $id = $self->{Signal}->{$uuid}->{ID};
+            my $url = Utils::extendString($self->{Source}->{Web}->{$provider}->{GetOut}->{URL}, "UUID|$uuid|ID|$id|DAY|$d|MONTH|$m|YEAR|$j");
+            Trace->Trc('I', 2, 0x02800, $self->{Signal}->{$uuid}->{ID}, $uuid);
+            $self->myGet($url, $provider);
+            if (defined($self->{Response})) {
+              Trace->Trc('I', 1, 0x02801, $self->{Response}->status_line(), $uuid);
+              # Historieneintrag vorhanden. Signal ist damit ungueltig
+              $self->{Signal}->{$uuid}->{Valid} = 0;
+            } else {
+              Trace->Trc('I', 4, 0x02802, $self->{Response}->status_line(), $uuid);
+            }
           }
         }
       }
     }
+    Trace->Trc('I', 4, 0x02803, 'GetIn');
+    # Unabhaengig vom Ergebnis des Check weitermachen mit der Ermittelung des aktuellen Wertes
+    $self->{Source}->{Web}->{$provider}->{Next} = 'GetIn';
   }
-  Trace->Trc('I', 4, 0x02803, 'GetIn');
-  # Unabhaengig vom Ergebnis des Check weitermachen mit der Ermittelung des aktuellen Wertes
-  $self->{Location}->{Next} = 'GetIn';
 
   Trace->Trc('S', 2, 0x00002, $self->{subroutine}, $rc);
   $self->{subroutine} = $merker;
@@ -890,9 +1083,10 @@ sub doDebugResponse {
   #################################################################
   #     Infos des Respondes ausgeben.
   #     Proc 1
-  my $self  = shift;
-  my $url   = shift;
-  my $param = join('|', @_);
+  my $self     = shift;
+  my $url      = shift;
+  my $provider = shift;
+  my $param    = join('|', @_);
   
   my $merker          = $self->{subroutine};
   $self->{subroutine} = (caller(0))[3];
@@ -909,7 +1103,7 @@ sub doDebugResponse {
   Trace->Trc('I', 4, 0x02100, 'Document valid until', defined($self->{Response}) ? scalar(localtime($self->{Response}->fresh_until())) : '-');
   my ($form, $action);
   if (defined($self->{Response})) {
-    if ($self->{Response}->content() =~ m/form[^>]*name="($self->{Location}->{Login}->{Form}->{Name})"/) {$form = $1};  
+    if ($self->{Response}->content() =~ m/form[^>]*name="($self->{Source}->{Web}->{$provider}->{Login}->{Form}->{Name})"/) {$form = $1};  
     if ($self->{Response}->content() =~ m/form[^>]*action="([^"]*)"/) {$action = $1};
   }
   Trace->Trc('I', 4, 0x02100, 'Form',   defined($form) ? $form : '-');

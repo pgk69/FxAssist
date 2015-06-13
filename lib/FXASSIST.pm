@@ -46,7 +46,7 @@ use vars qw(@ISA);
 use Trace;
 use CmdLine;
 use Configuration;
-use DBAccess;
+#use DBAccess;
 use Utils;
 
 #
@@ -63,8 +63,8 @@ use utf8;
 use Text::Unidecode;
 
 use Storable;
-use ZMQ::LibZMQ4;
-use ZMQ::FFI;
+#use ZMQ::LibZMQ4;
+#use ZMQ::FFI;
 
 #
 # Konstantendefinition
@@ -545,8 +545,10 @@ sub getData {
 
     # Verlgeich mit dem alten Signal
     if (!defined($self->{Store}->{Signal}->{ID}) || ($self->{Store}->{Signal}->{ID} ne $signal{ID})) {
+      my $firstsignal;
       if (!defined($self->{Store}->{Signal}->{ID})) {
         print "Erstsignal\n";
+        my $firstsignal = 1;
       } else {
         print "Neues Signal\n";
       }
@@ -559,6 +561,26 @@ sub getData {
       Trace->Trc('I', 1, 0x02310, "  Zeit:              " . $self->{Store}->{Signal}->{Zeit});
       Trace->Trc('I', 1, 0x02310, "  Stopp-Loss-Marke:  " . $self->{Store}->{Signal}->{SL});
       Trace->Trc('I', 1, 0x02310, "  Take-Profit_Marke: " . $self->{Store}->{Signal}->{TP});
+
+      my ($dd, $mon, $yy, $hh, $mm) = ($self->{Store}->{Signal}->{Zeit} =~ /(\d+)\.(\d+)\.(\d+).*?(\d+):(\d+)/);
+      
+
+      open my $fh, '>', '/home/fxrun/var/lib/fxassist/htdocs/start-signal.csv';
+      print $fh $self->{Store}->{Signal}->{Signal} . ';' . $self->{Store}->{Signal}->{Stand} . ';' . $self->{Store}->{Signal}->{SL} . ';' . $self->{Store}->{Signal}->{TP} . ';' . $yy . ';' . $mon . ';' . $dd . ';' . $hh . ';' . $mm . "\r\n";
+      close $fh;
+
+      if (! $firstsignal) {
+          my $event = $self->{Store}->{Signal}->{Signal} . ' @' . $self->{Store}->{Signal}->{Stand};
+          my $description =  'SL: ' . $self->{Store}->{Signal}->{SL} . '; TP: ' . $self->{Store}->{Signal}->{TP} . '; ' . $self->{Store}->{Signal}->{Zeit};
+          $event =~ tr/a-zA-Z0-9@.-:; //cd;
+          $description =~ tr/a-zA-Z0-9@.\-:; //cd;
+          foreach my $user ('mbartosch', 'pkempf', 'aleibl', 'mschiffner') {
+              `prowlnotify --recipient $user --application FxAssist --event "$event" --description "$description"`;
+          }
+	  foreach my $apikey ('738585db5467b88f162765c2798dbb4f6847a1d961b0cd33', '931241427ac46b657cc26d58860f69a6552da0f7ef1ede94', '18c0a7b7ae2d3e6ffedeee2ccf2d598659ddc02e009be2ad') {
+              `nma -apikey=$apikey -application="FxAssist" -event="$event" -notification="$description"`;
+          }
+    } 
     }
   } else {
     $self->doDebug();

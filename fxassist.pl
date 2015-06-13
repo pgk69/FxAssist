@@ -14,6 +14,8 @@ use v5.10;
 use strict;
 use vars qw($VERSION $SVN);
 
+use lib '/home/fxrun/lib/perl';
+
 use constant SVN_ID => '($Id: $)
 
 $Author: $ 
@@ -86,7 +88,7 @@ if ($@) {
   Trace->Exit(0, 1, 0x0ffff, Configuration->config('Prg', 'Name'), $VERSION);
 }
 $VERSION = $prg->version($VERSION);
-DBAccess->set_pers_Var(Configuration->config('DB', 'MYDB').'.config', 'Start');
+#DBAccess->set_pers_Var(Configuration->config('DB', 'MYDB').'.config', 'Start');
 
 while (1) {
   $prg->action();
@@ -96,7 +98,7 @@ while (1) {
 #$cron->add_entry(Configuration->config('Prg', 'Aktiv'));
 #$cron->run();
 
-DBAccess->set_pers_Var(Configuration->config('DB', 'MYDB').'.config', 'Ende '.CmdLine->new()->{ArgStrgRAW});
+#DBAccess->set_pers_Var(Configuration->config('DB', 'MYDB').'.config', 'Ende '.CmdLine->new()->{ArgStrgRAW});
 Trace->Exit(0, 1, 0x00002, Configuration->config('Prg', 'Name'), $VERSION);
 
 exit 1;

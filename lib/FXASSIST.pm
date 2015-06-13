@@ -568,6 +568,10 @@ sub getData {
       open my $fh, '>', '/home/fxrun/var/lib/fxassist/htdocs/start-signal.csv';
       print $fh $self->{Store}->{Signal}->{Signal} . ';' . $self->{Store}->{Signal}->{Stand} . ';' . $self->{Store}->{Signal}->{SL} . ';' . $self->{Store}->{Signal}->{TP} . ';' . $yy . ';' . $mon . ';' . $dd . ';' . $hh . ';' . $mm . "\r\n";
       close $fh;
+      open my $fh, '>', '/home/fxrun/var/lib/fxassist/htdocs/start-signal-uk.csv';
+      print $fh $self->{Store}->{Signal}->{Signal} . ';' . $self->{Store}->{Signal}->{Stand} . ';' . $self->{Store}->{Signal}->{SL} . ';' . $self->{Store}->{Signal}->{TP} . ';' . $yy . ';' . $mon . ';' . $dd . ';' . $hh - 1 . ';' . $mm . "\r\n";
+      close $fh;
+
 
       if (! $firstsignal) {
           my $event = $self->{Store}->{Signal}->{Signal} . ' @' . $self->{Store}->{Signal}->{Stand};
